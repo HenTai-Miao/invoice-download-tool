@@ -1,0 +1,25 @@
+directories:
+  output: dist-electron
+  buildResources: build
+appId: com.invoice.download.tool
+productName: 发票解析上传工具
+files:
+  - dist-electron/**/*
+win:
+  target: nsis
+  icon: public/favicon.ico
+nsis:
+  oneClick: false              # 非一键安装
+  perMachine: false            # 仅当前用户安装
+  allowToChangeInstallationDirectory: true  # 允许自定义安装路径
+  installerIcon: public/favicon.ico         # 安装程序图标
+  uninstallerIcon: public/favicon.ico       # 卸载程序图标
+  installerHeaderIcon: public/favicon.ico   # 安装程序头部图标
+  createDesktopShortcut: true               # 创建桌面快捷方式
+  createStartMenuShortcut: true            # 创建开始菜单快捷方式
+  shortcutName: ${productName}             # 快捷方式名称
+  runAfterFinish: true                      # 安装完成后运行应用
+  deleteAppDataOnUninstall: false           # 卸载时不删除应用数据
+asar: true
+asarUnpack:
+  - dist-electron/renderer/**/*
