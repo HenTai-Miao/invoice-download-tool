@@ -5,9 +5,9 @@
 主要功能
 
 - 单实例应用，自动聚焦已运行实例。
-- 监控目录 D:\develop\function-test\invoice-download-tool\pending-upload 中的 .zip。
+- 监控目录 D:\develop\function-test\invoice-parse-upload-tool\pending-upload 中的 .zip。
 - 顺序上传（互斥检查/去重），axios 上报进度，成功判定 response.data.code === 200。
-- 上传成功后移动到 D:\develop\function-test\invoice-download-tool\uploaded。
+- 上传成功后移动到 D:\develop\function-test\invoice-parse-upload-tool\uploaded。
 - 通过 IPC 向渲染进程推送 file-status-update、upload-history-update。
 - 维护最近上传历史（最多 20 条）。
 - 10 秒轮询检查新文件；支持 Ctrl+Shift+I 打开调试、F5 刷新。

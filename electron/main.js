@@ -1,9 +1,8 @@
-console.log('=== Electron 主进程启动 ===')
-
 import { app, BrowserWindow, ipcMain, Menu, globalShortcut } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'fs/promises'
+import fsSync from 'node:fs'
 import axios from 'axios'
 import FormData from 'form-data'
 import os from 'node:os'
@@ -11,6 +10,66 @@ import os from 'node:os'
 // 获取 __dirname 的 ES 模块等效方式
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// 日志系统配置
+const LOGS_DIR = path.join(path.dirname(app.getAppPath()), 'logs')
+let LOG_FILE = path.join(LOGS_DIR, `${new Date().toISOString().split('T')[0]}.log`)
+// 确保日志目录存在
+function ensureLogsDirExists() {
+  try {
+    if (!fsSync.existsSync(LOGS_DIR)) {
+      fsSync.mkdirSync(LOGS_DIR, { recursive: true })
+    }
+  } catch (error) {
+    console.error('创建日志目录失败:', error)
+  }
+}
+
+// 更新日志文件路径为当天日期
+function updateLogFile() {
+  const today = new Date().toISOString().split('T')[0]
+  const expectedLogFile = path.join(LOGS_DIR, `${today}.log`)
+  
+  // 如果不是同一天，则更新日志文件路径
+  if (LOG_FILE !== expectedLogFile) {
+    LOG_FILE = expectedLogFile
+  }
+}
+
+// 初始化日志系统
+ensureLogsDirExists()
+
+// 自定义日志函数
+function logToFile(message) {
+  try {
+    // 检查并更新日志文件路径
+    updateLogFile()
+    
+    const timestamp = new Date().toISOString()
+    const logEntry = `${timestamp} - ${message}\n`
+    fsSync.appendFileSync(LOG_FILE, logEntry, 'utf8')
+  } catch (error) {
+    console.error('写入日志文件失败:', error)
+  }
+}
+
+// 重定向 console.log 和 console.error
+const originalConsoleLog = console.log
+const originalConsoleError = console.error
+
+console.log = function(...args) {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ')
+  originalConsoleLog(...args)
+  logToFile(message)
+}
+
+console.error = function(...args) {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ')
+  originalConsoleError(...args)
+  logToFile(`[ERROR] ${message}`)
+}
+
+console.log('=== Electron 主进程启动 ===')
 
 // 设置环境变量
 process.env.DIST_ELECTRON = path.join(__dirname, '..')
@@ -140,7 +199,7 @@ if (!gotTheLock) {
   const PENDING_UPLOAD_DIR = path.join(BASE_DIR, 'pending-upload')
   const UPLOADED_DIR = path.join(BASE_DIR, 'uploaded')
   // 定义后端 API 地址
-  const UPLOAD_API_URL = 'http://10.8.0.10:8080/zz-resource/oss/endpoint/invoice-put-file'
+  const UPLOAD_API_URL = 'http://127.0.0.1:8080/zz-resource/oss/endpoint/invoice-put-file'
 
   let mainWindow
 
@@ -382,7 +441,7 @@ if (!gotTheLock) {
                   console.log(`文件${fileName}状态移除后，立即检查下一个待处理文件`);
                   checkForNewFiles();
                 }, 500);
-              }, 500); // 2秒固定延迟，确保前端有足够时间显示成功状态
+              }, 500); // 固定延迟，确保前端有足够时间显示成功状态
             } else {
               // 文件移动失败，更新文件状态为失败
               updateFileStatus(fileName, FileStatus.FAILED, 0, fileSize);

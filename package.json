@@ -1,5 +1,5 @@
 {
-  "name": "invoice-download-tool",
+  "name": "invoice-parse-upload-tool",
   "productName": "发票解析上传工具",
   "version": "1.0.0",
   "private": true,
