@@ -4,7 +4,15 @@
     <div class="main-content">
       <!-- 左侧：ZIP 文件上传状态 -->
       <div class="section-container">
-        <h2>ZIP 文件上传状态</h2>
+        <div class="section-header">
+          <h2>发票上传状态</h2>
+          <el-button
+            class="start-robot-btn"
+            @click="handleStartRobot"
+          >
+            我已登陆，开始执行机器人
+          </el-button>
+        </div>
         <!-- 内部小框用于展示正在上传的文件 -->
         <div class="inner-container">
           <div v-if="files.length === 0" class="empty-container">
@@ -46,7 +54,9 @@
 
       <!-- 右侧：最近上传历史 -->
       <div class="section-container">
-        <h2>最近上传历史</h2>
+        <div class="section-header">
+          <h2>最近上传历史</h2>
+        </div>
         <!-- 内部小框用于展示上传历史 -->
         <div class="inner-container">
           <div v-if="uploadHistory.length === 0" class="empty-container">
@@ -75,6 +85,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { ElMessage, ElButton } from "element-plus";
+import { robotApi } from "../api";
 
 interface FileItem {
   name: string;
@@ -93,6 +105,23 @@ const files = ref<FileItem[]>([]);
 const uploadHistory = ref<HistoryItem[]>([]);
 let pollInterval: number | null = null;
 
+// 请求参数
+// const params = ref('hebei')
+const params = ref('beijing')
+
+// 处理启动机器人按钮点击
+async function handleStartRobot() {
+    // 使用Element Plus的消息提示
+    ElMessage({
+        message: '机器人开始执行...',
+        type: 'success',
+        duration: 1500
+    });
+    
+    const result = await robotApi({taxSite: params.value});
+    console.log('机器人调用接口:', result);
+}
+
 // 格式化文件大小
 function formatFileSize(bytes?: number): string {
   if (!bytes || bytes === 0) return '0 B';
@@ -101,26 +130,6 @@ function formatFileSize(bytes?: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
-
-function updateFile(name: string, status: string, progress?: number, size?: number) {
-  const exist = files.value.find((f) => f.name === name);
-  if (exist) {
-    exist.status = status as any;
-    if (progress !== undefined) exist.progress = progress;
-    if (size !== undefined) exist.size = size;
-  } else {
-    // 添加新文件，无论状态如何
-    const newFile: FileItem = {
-      name,
-      status: status as any
-    };
-    if (progress !== undefined) newFile.progress = progress;
-    if (size !== undefined) newFile.size = size;
-    files.value.push(newFile);
-  }
-}
-
-
 
 onMounted(async () => {
   // 使用类型断言来访问 electronAPI
@@ -190,12 +199,45 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
+.section-header {
+  height: 45px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .section-container h2 {
-  margin-top: 0;
-  margin-bottom: 20px;
+  margin: 0;
   color: #333;
   font-size: 18px;
   font-weight: 600;
+  line-height: 1.5;
+}
+
+/* 启动机器人按钮样式 */
+.start-robot-btn,
+.el-button.start-robot-btn {
+  background-color: #42b883 !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  border-radius: 4px !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  cursor: pointer !important;
+  transition: background-color 0.3s ease !important;
+  box-shadow: none !important;
+}
+
+.start-robot-btn:hover,
+.el-button.start-robot-btn:hover {
+  background-color: #359670 !important;
+}
+
+.start-robot-btn:disabled,
+.el-button.start-robot-btn:disabled {
+  background-color: #cccccc !important;
+  cursor: not-allowed !important;
 }
 
 /* 统一的内部容器样式（内部小框） */
