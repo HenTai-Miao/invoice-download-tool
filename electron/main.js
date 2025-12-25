@@ -203,7 +203,7 @@ if (!gotTheLock) {
   const PENDING_UPLOAD_DIR = path.join(BASE_DIR, 'pending-upload')
   const UPLOADED_DIR = path.join(BASE_DIR, 'uploaded')
   // 定义后端 API 地址
-  const UPLOAD_API_URL = 'http://10.8.0.34:8083/zz-resource/oss/endpoint/invoice-put-file'
+  const UPLOAD_API_URL = 'http://10.141.24.63:8083/zz-resource/oss/endpoint/invoice-put-file'
 
   let mainWindow
 

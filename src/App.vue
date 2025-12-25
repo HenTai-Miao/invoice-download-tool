@@ -94,17 +94,17 @@
 import { ref, onMounted } from "vue";
 import { ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput } from "element-plus";
 import { robotApi } from "./api";
-// // 河北电子税务局
-// // 请求参数
-// const params = 'hebei'
-// // 电子税务局地址
-// const taxOfficeAddress = 'http://hebei.chinatax.gov.cn/hbsw/index.html'
-
-// 北京电子税务局
+// 河北电子税务局
 // 请求参数
-const params = 'beijing'
+const params = 'hebei'
 // 电子税务局地址
-const taxOfficeAddress = 'https://etax.beijing.chinatax.gov.cn:8443/'
+const taxOfficeAddress = 'http://hebei.chinatax.gov.cn/hbsw/index.html'
+
+// // 北京电子税务局
+// // 请求参数
+// const params = 'beijing'
+// // 电子税务局地址
+// const taxOfficeAddress = 'https://etax.beijing.chinatax.gov.cn:8443/'
 
 // 设置对话框可见性
 const settingsDialogVisible = ref(false)
