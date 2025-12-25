@@ -319,6 +319,8 @@ if (!gotTheLock) {
       
       // 使用exec执行命令，捕获完整的错误信息
       exec(execCommand, { 
+        // 设置当前工作目录为脚本所在目录，确保jar文件能被正确找到
+        cwd: scriptDir,
         // 设置环境变量，确保继承用户的PATH
         env: { ...process.env },
         // 设置超时时间为10秒
