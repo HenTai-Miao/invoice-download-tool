@@ -220,6 +220,11 @@ if (!gotTheLock) {
   // 互斥标志位 - 防止checkForNewFiles并发调用
   let isCheckingFiles = false
 
+  // 全局计时器变量，用于存储7小时后执行stop命令的计时器
+  let autoStopTimer = null
+  // 7小时的毫秒数
+  const AUTO_STOP_DELAY = 7 * 60 * 60 * 1000
+
   // 文件状态类型
   const FileStatus = {
     PENDING: 'pending',
@@ -255,10 +260,14 @@ if (!gotTheLock) {
   // 脚本执行函数
   function executeScript(scriptPath, scriptName, command) {
     return new Promise((resolve, reject) => {
+      // 记录执行开始时间
+      const startTime = new Date()
       // 现在直接使用完整的脚本路径
       const fullPath = scriptPath
+      console.log('=== 开始执行脚本 ===')
+      console.log('执行时间:', startTime.toISOString())
       console.log('执行脚本路径:', fullPath)
-      console.log('执行命令:', command)
+      console.log('执行命令参数:', command)
       
       // 检查脚本文件是否存在
       if (!fsSync.existsSync(fullPath)) {
@@ -269,14 +278,44 @@ if (!gotTheLock) {
       
       // 添加环境变量调试信息
       console.log('当前工作目录:', process.cwd())
+      console.log('当前PATH环境变量:', process.env.PATH)
+      console.log('当前平台:', process.platform)
       
-      // 获取脚本所在目录
+      // 获取脚本所在目录和扩展名
       const scriptDir = path.dirname(fullPath)
+      const scriptExt = path.extname(fullPath).toLowerCase()
       console.log('脚本所在目录:', scriptDir)
+      console.log('脚本扩展名:', scriptExt)
       
-      // Windows平台sh脚本执行方式
-      const execCommand = `cmd.exe /c "cd \"${scriptDir}\" && sh \"${fullPath}\" ${command}"`
-      console.log('执行命令:', execCommand)
+      // 定义不同平台和文件类型的执行方式
+      let execCommand;
+      
+      // 强制Windows批处理文件使用cmd.exe执行，无论平台检测结果如何
+      if (scriptExt === '.bat' || scriptExt === '.cmd') {
+        // .bat/.cmd批处理文件，直接用cmd.exe执行
+        execCommand = `cmd.exe /c "cd \"${scriptDir}\" && call \"${fullPath}\" ${command}"`
+        console.log('强制使用cmd.exe执行批处理文件')
+      } else if (process.platform === 'win32') {
+        // Windows平台的其他文件类型
+        if (scriptExt === '.sh') {
+          // .sh脚本文件，尝试使用sh命令（Git Bash等）
+          execCommand = `cmd.exe /c "cd \"${scriptDir}\" && sh \"${fullPath}\" ${command}"`
+        } else {
+          // 其他类型文件，尝试直接执行
+          execCommand = `cmd.exe /c "cd \"${scriptDir}\" && \"${fullPath}\" ${command}"`
+        }
+      } else {
+        // Linux/macOS平台的执行方式
+        if (scriptExt === '.sh') {
+          // .sh脚本，直接用sh执行
+          execCommand = `sh \"${fullPath}\" ${command}`
+        } else {
+          // 其他类型文件，尝试直接执行
+          execCommand = `\"${fullPath}\" ${command}`
+        }
+      }
+      
+      console.log('最终执行命令:', execCommand)
       
       // 使用exec执行命令，捕获完整的错误信息
       exec(execCommand, { 
@@ -285,6 +324,14 @@ if (!gotTheLock) {
         // 设置超时时间为10秒
         timeout: 10000
       }, (error, stdout, stderr) => {
+        // 记录执行结束时间和耗时
+        const endTime = new Date()
+        const duration = endTime - startTime
+        console.log('=== 执行结果 ===')
+        console.log('执行结束时间:', endTime.toISOString())
+        console.log('执行耗时:', duration, '毫秒')
+        console.log('执行成功:', !error)
+        console.log('执行命令:', execCommand)
         console.log('执行结果:', {
           error: error,
           stdout: stdout,
@@ -711,6 +758,30 @@ if (!gotTheLock) {
       const config = await readConfig()
       if (!config.scriptPath) {
         throw new Error('脚本配置未完成，请先配置脚本文件')
+      }
+      
+      // 如果是restart命令，设置7小时后自动执行stop命令
+      if (command === 'restart') {
+        // 取消之前的计时器
+        if (autoStopTimer) {
+          clearTimeout(autoStopTimer)
+          console.log('已取消之前的自动停止计时器')
+        }
+        
+        // 设置新的计时器，7小时后执行stop命令
+        autoStopTimer = setTimeout(async () => {
+          console.log('7小时时间到，自动执行stop命令')
+          try {
+            await executeScript(config.scriptPath, '', 'stop')
+            console.log('自动执行stop命令成功')
+          } catch (error) {
+            console.error('自动执行stop命令失败:', error)
+          }
+          // 计时器执行后清空
+          autoStopTimer = null
+        }, AUTO_STOP_DELAY)
+        
+        console.log('已设置7小时后自动执行stop命令的计时器')
       }
       
       // 不再需要scriptName参数，传递完整路径即可

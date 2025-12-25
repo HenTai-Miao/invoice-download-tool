@@ -94,17 +94,17 @@
 import { ref, onMounted } from "vue";
 import { ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput } from "element-plus";
 import { robotApi } from "./api";
-// 河北电子税务局
-// 请求参数
-const params = 'hebei'
-// 电子税务局地址
-const taxOfficeAddress = 'http://hebei.chinatax.gov.cn/hbsw/index.html'
-
-// // 北京电子税务局
+// // 河北电子税务局
 // // 请求参数
-// const params = 'beijing'
+// const params = 'hebei'
 // // 电子税务局地址
-// const taxOfficeAddress = 'https://etax.beijing.chinatax.gov.cn:8443/'
+// const taxOfficeAddress = 'http://hebei.chinatax.gov.cn/hbsw/index.html'
+
+// 北京电子税务局
+// 请求参数
+const params = 'beijing'
+// 电子税务局地址
+const taxOfficeAddress = 'https://etax.beijing.chinatax.gov.cn:8443/'
 
 // 设置对话框可见性
 const settingsDialogVisible = ref(false)
@@ -121,11 +121,9 @@ function openSettingsDialog() {
 
 // 选择脚本路径
 function selectScriptPath() {
-  // 根据当前平台设置可用的脚本扩展名
-  const isWindows = navigator.platform.includes('Win')
-  // Windows平台也需要支持.sh脚本，因为用户安装了sh环境
-  const extensions = isWindows ? ['bat', 'cmd', 'js', 'py', 'sh'] : ['sh', 'js', 'py']
-  const filterName = isWindows ? 'Windows脚本文件' : 'Unix脚本文件'
+  // 只允许选择bat文件
+  const extensions = ['bat']
+  const filterName = '批处理文件'
 
   // @ts-expect-error 调用Electron的文件选择器
   window.electronAPI.showOpenDialog({

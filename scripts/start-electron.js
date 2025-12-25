@@ -41,7 +41,7 @@ viteProcess.on('spawn', () => {
     const electronProcess = spawn('npx', ['electron', '.'], {
       stdio: 'inherit',
       shell: true,
-      cwd: __dirname,
+      cwd: path.join(__dirname, '..'), // 设置为项目根目录
       env: {
         ...process.env,
         VITE_DEV_SERVER_URL: viteServerUrl
