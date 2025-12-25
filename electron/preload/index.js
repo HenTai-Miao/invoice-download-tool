@@ -4,7 +4,10 @@ const IPC_CHANNELS = {
   GET_DOWNLOADED_COUNT: 'get-downloaded-count',
   ZIP_LIST: 'zip-list',
   UPLOAD_STATUS: 'upload-status',
-  GET_UPLOAD_STATUS: 'get-upload-status'
+  GET_UPLOAD_STATUS: 'get-upload-status',
+  GET_SCRIPT_CONFIG: 'get-script-config',
+  SAVE_SCRIPT_CONFIG: 'save-script-config',
+  EXECUTE_SCRIPT: 'execute-script'
 };
 
 const electronAPI = {
@@ -27,7 +30,14 @@ const electronAPI = {
     ipcRenderer.on('file-status-update', (_, data) => callback(data)),
 
   onUploadHistoryUpdate: (callback) =>
-    ipcRenderer.on('upload-history-update', (_, data) => callback(data))
+    ipcRenderer.on('upload-history-update', (_, data) => callback(data)),
+
+  showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
+  
+  // 脚本配置和执行API
+  getScriptConfig: () => ipcRenderer.invoke('get-script-config'),
+  saveScriptConfig: (config) => ipcRenderer.invoke('save-script-config', config),
+  executeScript: (command) => ipcRenderer.invoke('execute-script', command)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

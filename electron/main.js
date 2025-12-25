@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu, globalShortcut } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, globalShortcut, dialog } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'fs/promises'
 import fsSync from 'node:fs'
+import { exec, execSync } from 'node:child_process'
 import axios from 'axios'
 import FormData from 'form-data'
 import os from 'node:os'
@@ -14,6 +15,9 @@ const __dirname = path.dirname(__filename)
 // 日志系统配置
 const LOGS_DIR = path.join(path.dirname(app.getAppPath()), 'logs')
 let LOG_FILE = path.join(LOGS_DIR, `${new Date().toISOString().split('T')[0]}.log`)
+
+// 配置文件路径
+const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json')
 // 确保日志目录存在
 function ensureLogsDirExists() {
   try {
@@ -199,7 +203,7 @@ if (!gotTheLock) {
   const PENDING_UPLOAD_DIR = path.join(BASE_DIR, 'pending-upload')
   const UPLOADED_DIR = path.join(BASE_DIR, 'uploaded')
   // 定义后端 API 地址
-  const UPLOAD_API_URL = 'http://10.141.24.63:8083/zz-resource/oss/endpoint/invoice-put-file'
+  const UPLOAD_API_URL = 'http://10.8.0.34:8083/zz-resource/oss/endpoint/invoice-put-file'
 
   let mainWindow
 
@@ -222,6 +226,91 @@ if (!gotTheLock) {
     UPLOADING: 'uploading',
     SUCCESS: 'success',
     FAILED: 'failed'
+  }
+
+  // 配置文件读写函数
+  async function readConfig() {
+    try {
+      if (fsSync.existsSync(CONFIG_FILE)) {
+        const data = await fs.readFile(CONFIG_FILE, 'utf-8')
+        return JSON.parse(data)
+      }
+      return {}
+    } catch (error) {
+      console.error('读取配置文件失败:', error)
+      return {}
+    }
+  }
+
+  async function writeConfig(config) {
+    try {
+      await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8')
+      return true
+    } catch (error) {
+      console.error('写入配置文件失败:', error)
+      return false
+    }
+  }
+
+  // 脚本执行函数
+  function executeScript(scriptPath, scriptName, command) {
+    return new Promise((resolve, reject) => {
+      // 现在直接使用完整的脚本路径
+      const fullPath = scriptPath
+      console.log('执行脚本路径:', fullPath)
+      console.log('执行命令:', command)
+      
+      // 检查脚本文件是否存在
+      if (!fsSync.existsSync(fullPath)) {
+        console.error('脚本文件不存在:', fullPath)
+        reject(new Error(`执行脚本失败: 脚本文件不存在 - ${fullPath}`))
+        return
+      }
+      
+      // 添加环境变量调试信息
+      console.log('当前工作目录:', process.cwd())
+      
+      // 获取脚本所在目录
+      const scriptDir = path.dirname(fullPath)
+      console.log('脚本所在目录:', scriptDir)
+      
+      // Windows平台sh脚本执行方式
+      const execCommand = `cmd.exe /c "cd \"${scriptDir}\" && sh \"${fullPath}\" ${command}"`
+      console.log('执行命令:', execCommand)
+      
+      // 使用exec执行命令，捕获完整的错误信息
+      exec(execCommand, { 
+        // 设置环境变量，确保继承用户的PATH
+        env: { ...process.env },
+        // 设置超时时间为10秒
+        timeout: 10000
+      }, (error, stdout, stderr) => {
+        console.log('执行结果:', {
+          error: error,
+          stdout: stdout,
+          stderr: stderr
+        })
+        
+        if (error) {
+          console.error('执行脚本错误:', error)
+          console.error('stderr:', stderr)
+          console.error('stdout:', stdout)
+          
+          // 提供详细的错误信息
+          let errorMsg = `执行脚本失败: `
+          if (stderr) errorMsg += stderr.trim()
+          else if (stdout) errorMsg += stdout.trim()
+          else errorMsg += error.message
+          
+          reject(new Error(errorMsg))
+        } else {
+          // 执行成功
+          console.log('脚本执行成功')
+          console.log('stdout:', stdout)
+          resolve({ success: true, output: stdout })
+        }
+      })
+    })
   }
 
   // 添加文件到上传历史
@@ -589,6 +678,60 @@ if (!gotTheLock) {
     }
   });
 
+  // 获取脚本配置
+  ipcMain.handle('get-script-config', async () => {
+    try {
+      const config = await readConfig()
+      return {
+        scriptPath: config.scriptPath || ''
+      }
+    } catch (error) {
+      console.error('获取脚本配置失败:', error)
+      throw error
+    }
+  })
+
+  // 保存脚本配置
+  ipcMain.handle('save-script-config', async (event, { scriptPath, scriptName }) => {
+    try {
+      const config = await readConfig()
+      config.scriptPath = scriptPath
+      config.scriptName = scriptName || '' // 保留scriptName字段以兼容旧配置
+      await writeConfig(config)
+      return { success: true }
+    } catch (error) {
+      console.error('保存脚本配置失败:', error)
+      throw error
+    }
+  })
+
+  // 执行脚本
+  ipcMain.handle('execute-script', async (event, { command = 'restart' }) => {
+    try {
+      const config = await readConfig()
+      if (!config.scriptPath) {
+        throw new Error('脚本配置未完成，请先配置脚本文件')
+      }
+      
+      // 不再需要scriptName参数，传递完整路径即可
+      return await executeScript(config.scriptPath, '', command)
+    } catch (error) {
+      console.error('执行脚本失败:', error)
+      throw error
+    }
+  })
+
+  // 显示文件选择对话框
+  ipcMain.handle('show-open-dialog', async (event, options) => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, options)
+      return result
+    } catch (error) {
+      console.error('显示文件选择对话框失败:', error)
+      throw error
+    }
+  })
+
   function createWindow() {
     // 创建浏览器窗口
     console.log( path.join(
@@ -664,6 +807,8 @@ if (!gotTheLock) {
     console.log('获取上传历史记录:', uploadHistory);
     return uploadHistory;
   })
+
+
 
   // 应用准备就绪时创建窗口并启动监控
   app.whenReady().then(() => {

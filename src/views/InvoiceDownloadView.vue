@@ -6,12 +6,6 @@
       <div class="section-container">
         <div class="section-header">
           <h2>发票上传状态</h2>
-          <el-button
-            class="start-robot-btn"
-            @click="handleStartRobot"
-          >
-            我已登陆，开始执行机器人
-          </el-button>
         </div>
         <!-- 内部小框用于展示正在上传的文件 -->
         <div class="inner-container">
@@ -85,8 +79,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
-import { ElMessage, ElButton } from "element-plus";
-import { robotApi } from "../api";
 
 interface FileItem {
   name: string;
@@ -103,24 +95,7 @@ interface HistoryItem {
 
 const files = ref<FileItem[]>([]);
 const uploadHistory = ref<HistoryItem[]>([]);
-let pollInterval: number | null = null;
-
-// 请求参数
-// const params = ref('hebei')
-const params = ref('beijing')
-
-// 处理启动机器人按钮点击
-async function handleStartRobot() {
-    // 使用Element Plus的消息提示
-    ElMessage({
-        message: '机器人开始执行...',
-        type: 'success',
-        duration: 1500
-    });
-    
-    const result = await robotApi({taxSite: params.value});
-    console.log('机器人调用接口:', result);
-}
+const pollInterval: number | null = null;
 
 // 格式化文件大小
 function formatFileSize(bytes?: number): string {
@@ -214,31 +189,7 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-/* 启动机器人按钮样式 */
-.start-robot-btn,
-.el-button.start-robot-btn {
-  background-color: #42b883 !important;
-  color: white !important;
-  border: none !important;
-  padding: 8px 16px !important;
-  border-radius: 4px !important;
-  font-size: 14px !important;
-  line-height: 1.5 !important;
-  cursor: pointer !important;
-  transition: background-color 0.3s ease !important;
-  box-shadow: none !important;
-}
 
-.start-robot-btn:hover,
-.el-button.start-robot-btn:hover {
-  background-color: #359670 !important;
-}
-
-.start-robot-btn:disabled,
-.el-button.start-robot-btn:disabled {
-  background-color: #cccccc !important;
-  cursor: not-allowed !important;
-}
 
 /* 统一的内部容器样式（内部小框） */
 .inner-container {
