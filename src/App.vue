@@ -92,7 +92,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput } from "element-plus";
+import { ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElLoading } from "element-plus";
 import { robotApi } from "./api";
 // 河北电子税务局
 // 请求参数
@@ -163,8 +163,19 @@ async function saveScriptConfig() {
 // 打开机器人浏览器（执行脚本）
 async function handleOpenRobotBrowser() {
   try {
+    // 显示正在调用机器人浏览器的加载效果（使用 ElLoading.service 保持颜色一致）
+    const loadingInstance = ElLoading.service({
+      text: '正在调用机器人浏览器',
+      background: 'rgba(0, 0, 0, 0.8)'
+    })
+
     // @ts-expect-error 调用Electron的API
     await window.electronAPI.executeScript({ command: 'restart' })
+    
+    // 关闭加载效果
+    loadingInstance.close()
+    
+    // 显示成功提示
     ElMessage.success('正在打开机器人浏览器...')
   } catch (error) {
     console.error('执行脚本失败:', error)
