@@ -1,6 +1,5 @@
 <template>
   <div class="layout">
-    <!-- 侧边栏 -->
     <aside class="sidebar">
       <div class="logo">
         <h3>发票解析上传工具（河北）</h3>
@@ -13,26 +12,24 @@
         </RouterLink>
       </nav>
 
-      <!-- 启动机器人 -->
       <div class="sidebar-button-container">
         <el-button
           class="start-robot-btn"
-          type="primary"
+          :type="robotState === 'running' ? 'danger' : 'primary'"
           @click="handleOpenRobotBrowser"
         >
           {{ robotState === 'running' ? '停止监控' : '启动机器人下载发票' }}
         </el-button>
 
-        <!-- 重启间隔 -->
         <div class="interval-setting">
           <label>重启间隔(分钟):</label>
           <input
             v-model.number="restartIntervalMinutes"
             type="number"
+            min="1"
           />
         </div>
 
-        <!-- 端口状态 -->
         <div class="port-status">
           <span
             class="status-indicator"
@@ -42,23 +39,24 @@
           </span>
         </div>
 
-        <!-- 倒计时 -->
         <div v-if="robotState === 'restarting' && remainingSeconds > 0" class="countdown">
-          <span class="countdown-text">
-            重启倒计时：{{ formatTime(remainingSeconds) }}
-          </span>
+          <div class="countdown-info">
+            <span class="countdown-text">
+              重启倒计时：{{ formatTime(remainingSeconds) }}
+            </span>
+          </div>
           <el-button
             size="small"
             type="danger"
+            plain
             @click="cancelRestart"
-            style="margin-left: 10px;"
+            style="width: 100%; margin-top: 5px;"
           >
-            取消重启
+            取消重启并停止
           </el-button>
         </div>
       </div>
 
-      <!-- 设置 -->
       <div class="settings-container">
         <el-button type="text" @click="openSettingsDialog">
           ⚙️ 设置
@@ -66,12 +64,10 @@
       </div>
     </aside>
 
-    <!-- 主内容 -->
     <main class="main-content">
       <RouterView />
     </main>
 
-    <!-- 设置弹窗 -->
     <el-dialog v-model="settingsDialogVisible" title="脚本配置" width="500px">
       <el-form :model="scriptConfig" label-width="100px">
         <el-form-item label="脚本文件">
@@ -104,28 +100,23 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElLoading } from 'element-plus'
 
 /* -------------------- 基础状态 -------------------- */
-
 type RobotState = 'idle' | 'running' | 'restarting'
 
 const robotState = ref<RobotState>('idle')
 const portStatus = ref<'online' | 'offline'>('offline')
-
 const restartIntervalMinutes = ref(1)
 const remainingSeconds = ref(0)
 
-/* -------------------- 定时器 -------------------- */
-
+/* -------------------- 定时器句柄 -------------------- */
 const checkTimer = ref<NodeJS.Timeout | null>(null)
 const restartTimer = ref<NodeJS.Timeout | null>(null)
 const countdownTimer = ref<NodeJS.Timeout | null>(null)
 
 /* -------------------- 设置相关 -------------------- */
-
 const settingsDialogVisible = ref(false)
 const scriptConfig = ref({ scriptPath: '' })
 
 /* -------------------- 工具函数 -------------------- */
-
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = seconds % 60
@@ -136,6 +127,118 @@ function openSettingsDialog() {
   settingsDialogVisible.value = true
 }
 
+// 清除所有计时器
+function clearTimers() {
+  if (checkTimer.value) clearInterval(checkTimer.value)
+  if (restartTimer.value) clearTimeout(restartTimer.value)
+  if (countdownTimer.value) clearInterval(countdownTimer.value)
+  checkTimer.value = null
+  restartTimer.value = null
+  countdownTimer.value = null
+}
+
+/* -------------------- 核心业务逻辑 -------------------- */
+
+// 1. 启动/停止主入口
+async function handleOpenRobotBrowser() {
+  if (robotState.value === 'running') {
+    await stopRobotService()
+    return
+  }
+
+  const loading = ElLoading.service({ text: '正在启动机器人...', background: 'rgba(0,0,0,0.7)' })
+  try {
+    // 执行重启命令（作为初始化启动）
+    // @ts-expect-error Electron
+    await window.electronAPI.executeScript({ command: 'restart' })
+    robotState.value = 'running'
+    ElMessage.success('机器人启动成功')
+  } catch (error: any) {
+    console.error('启动异常:', error)
+    ElMessage.warning('启动命令已发送，请检查浏览器是否打开')
+    robotState.value = 'running'
+  } finally {
+    loading.close()
+  }
+}
+
+// 2. 停止机器人服务（通用停止逻辑）
+async function stopRobotService() {
+  const loading = ElLoading.service({ text: '正在停止服务...', background: 'rgba(0,0,0,0.7)' })
+  try {
+    clearTimers()
+    // @ts-expect-error Electron
+    await window.electronAPI.executeScript({ command: 'stop' })
+    robotState.value = 'idle'
+    portStatus.value = 'offline'
+    remainingSeconds.value = 0
+    ElMessage.success('服务已停止')
+
+    // 停止后重新开启独立的纯监测模式
+    startIndependentPortMonitoring()
+  } catch (error) {
+    ElMessage.error('停止服务失败')
+  } finally {
+    loading.close()
+  }
+}
+
+// 3. 取消重启按钮逻辑
+async function cancelRestart() {
+  console.log('用户手动取消重启')
+  // 核心逻辑：清除计时器 -> 状态设为闲置 -> 调用 stop 命令
+  await stopRobotService()
+}
+
+// 4. 端口监控逻辑
+function startIndependentPortMonitoring() {
+  if (checkTimer.value) clearInterval(checkTimer.value)
+  checkTimer.value = setInterval(async () => {
+    try {
+      // @ts-expect-error Electron
+      const result = await window.electronAPI.checkPort(8082)
+      portStatus.value = result?.isListening ? 'online' : 'offline'
+
+      // 只有在运行状态下，且发现离线时，才触发重启倒计时
+      if (robotState.value === 'running' && portStatus.value === 'offline') {
+        scheduleRestart()
+      }
+    } catch (e) {
+      portStatus.value = 'offline'
+    }
+  }, 2000)
+}
+
+// 5. 触发重启倒计时
+function scheduleRestart() {
+  if (robotState.value !== 'running') return
+
+  robotState.value = 'restarting'
+  remainingSeconds.value = restartIntervalMinutes.value * 60
+
+  // 倒计时显示
+  countdownTimer.value = setInterval(() => {
+    if (remainingSeconds.value > 0) {
+      remainingSeconds.value--
+    }
+  }, 1000)
+
+  // 到点执行重启
+  restartTimer.value = setTimeout(async () => {
+    if (robotState.value === 'restarting') {
+      try {
+        // @ts-expect-error Electron
+        await window.electronAPI.executeScript({ command: 'restart' })
+        robotState.value = 'running'
+        clearInterval(countdownTimer.value!)
+      } catch (e) {
+        console.error('自动重启失败')
+      }
+    }
+  }, restartIntervalMinutes.value * 60 * 1000)
+}
+
+/* -------------------- Electron 文件操作 -------------------- */
 function selectScriptPath() {
   // @ts-expect-error Electron
   window.electronAPI.showOpenDialog({
@@ -145,11 +248,7 @@ function selectScriptPath() {
   }).then((res: any) => {
     if (!res.canceled && res.filePaths?.length) {
       scriptConfig.value.scriptPath = res.filePaths[0]
-      console.log('已选择脚本:', scriptConfig.value.scriptPath)
     }
-  }).catch((error: any) => {
-    console.error('选择文件失败:', error)
-    ElMessage.error('选择文件失败')
   })
 }
 
@@ -158,233 +257,26 @@ async function saveScriptConfig() {
     ElMessage.warning('请选择脚本文件')
     return
   }
-
-  const loading = ElLoading.service({
-    text: '正在保存配置...',
-    background: 'rgba(0,0,0,0.7)'
-  })
-
   try {
-    console.log('开始保存配置:', scriptConfig.value)
-
-    // 检查 API 是否存在
     // @ts-expect-error Electron
-    if (!window.electronAPI?.saveScriptConfig) {
-      throw new Error('保存配置接口不存在')
-    }
-
-    // 创建纯净的配置对象（只包含可序列化的数据）
-    const configToSave = {
-      scriptPath: scriptConfig.value.scriptPath
-    }
-
-    // @ts-expect-error Electron
-    const result = await Promise.race([
-      window.electronAPI.saveScriptConfig(configToSave),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('保存超时')), 5000)
-      )
-    ])
-
-    console.log('保存结果:', result)
+    await window.electronAPI.saveScriptConfig({ scriptPath: scriptConfig.value.scriptPath })
     ElMessage.success('配置保存成功')
     settingsDialogVisible.value = false
-  } catch (error: any) {
-    console.error('保存配置失败:', error)
-    ElMessage.error(error.message || '配置保存失败，请重试')
-  } finally {
-    loading.close()
-  }
-}
-
-/* -------------------- 启动 / 停止 -------------------- */
-
-async function handleOpenRobotBrowser() {
-  if (robotState.value === 'running') {
-    // 停止监控时调用脚本的 stop 命令
-    const loading = ElLoading.service({
-      text: '正在停止机器人...',
-      background: 'rgba(0,0,0,0.7)'
-    })
-
-    try {
-      console.log('调用脚本 stop 命令...')
-      // @ts-expect-error Electron
-      await window.electronAPI.executeScript({ command: 'stop' })
-      console.log('脚本 stop 命令执行完成')
-      ElMessage.success('机器人已停止')
-    } catch (error: any) {
-      console.error('停止机器人异常:', error)
-      ElMessage.warning('机器人停止命令已发送')
-    } finally {
-      loading.close()
-      stopAll()
-    }
-    return
-  }
-
-  const loading = ElLoading.service({
-    text: '正在启动机器人浏览器',
-    background: 'rgba(0,0,0,0.7)'
-  })
-
-  try {
-    console.log('开始启动机器人...')
-    await restartRobot(false)
-    console.log('机器人启动完成')
-    ElMessage.success('机器人启动成功')
-  } catch (error: any) {
-    console.error('机器人启动异常:', error)
-    console.error('错误详情:', error.message, error.stack)
-
-    // 即使有错误，如果浏览器已经打开，也认为是成功的
-    ElMessage.warning('机器人已启动，但可能有警告信息')
-
-    // 仍然启动监控
-    robotState.value = 'running'
-    setTimeout(() => {
-      startPortMonitoring()
-    }, 3000)
-  } finally {
-    loading.close()
-  }
-}
-
-// 独立的端口监控函数 - 不依赖机器人状态
-function startIndependentPortMonitoring() {
-  console.log('启动独立端口监控')
-
-  // 立即检测一次
-  checkPortIndependently()
-
-  // 每1秒检测一次
-  checkTimer.value = setInterval(checkPortIndependently, 1000)
-}
-
-async function checkPortIndependently() {
-  try {
-    // @ts-expect-error Electron
-    if (!window.electronAPI?.checkPort) {
-      console.error('checkPort 方法不存在')
-      return
-    }
-
-    // @ts-expect-error Electron
-    const result = await window.electronAPI.checkPort(8082)
-
-    if (result && result.isListening) {
-      portStatus.value = 'online'
-    } else {
-      portStatus.value = 'offline'
-
-      // 只有在机器人运行状态下才触发重启
-      if (robotState.value === 'running') {
-        scheduleRestart()
-      }
-    }
   } catch (error) {
-    console.log('独立端口检测失败:', error)
-    portStatus.value = 'offline'
+    ElMessage.error('保存失败')
   }
 }
 
-/* -------------------- 核心逻辑 -------------------- */
-
-async function restartRobot(showMessage = true) {
-  robotState.value = 'restarting'
-  clearTimers()
-
-  // @ts-expect-error Electron
-  await window.electronAPI.executeScript({ command: 'restart' })
-
-  robotState.value = 'running'
-
-  setTimeout(startPortMonitoring, 3000)
-  showMessage && ElMessage.success('机器人已重启')
-}
-
-function startPortMonitoring() {
-  clearTimers()
-  checkPortOnce()
-  checkTimer.value = setInterval(checkPortOnce, 1000) // 1秒检测一次
-}
-
-async function checkPortOnce() {
-  if (robotState.value !== 'running') return
-
-  try {
-    // 使用 netstat 命令检查端口
-    // @ts-expect-error Electron
-    const result = await window.electronAPI.checkPort(8082)
-
-    console.log('端口检测结果:', result)
-
-    if (result && result.isListening) {
-      portStatus.value = 'online'
-    } else {
-      portStatus.value = 'offline'
-      scheduleRestart()
-    }
-  } catch (error) {
-    console.log('端口检测失败:', error)
-    portStatus.value = 'offline'
-    scheduleRestart()
-  }
-}
-
-function scheduleRestart() {
-  if (robotState.value !== 'running') return
-
-  robotState.value = 'restarting'
-  clearTimers()
-
-  // 设置倒计时（转换为秒）
-  remainingSeconds.value = restartIntervalMinutes.value * 60
-
-  // 启动倒计时定时器
-  countdownTimer.value = setInterval(() => {
-    remainingSeconds.value--
-    if (remainingSeconds.value <= 0) {
-      clearInterval(countdownTimer.value!)
-      countdownTimer.value = null
-    }
-  }, 1000)
-
-  restartTimer.value = setTimeout(() => {
-    restartRobot()
-  }, restartIntervalMinutes.value * 60 * 1000)
-}
-
-/* -------------------- 清理 -------------------- */
-
-function clearTimers() {
-  checkTimer.value && clearInterval(checkTimer.value)
-  restartTimer.value && clearTimeout(restartTimer.value)
-  countdownTimer.value && clearInterval(countdownTimer.value)
-  checkTimer.value = null
-  restartTimer.value = null
-  countdownTimer.value = null
-}
-
-function stopAll() {
-  robotState.value = 'idle'
-  portStatus.value = 'offline'
-  remainingSeconds.value = 0
-  clearTimers()
-}
-
+/* -------------------- 生命周期 -------------------- */
 onMounted(async () => {
   // @ts-expect-error Electron
   const cfg = await window.electronAPI.getScriptConfig()
   scriptConfig.value.scriptPath = cfg?.scriptPath || ''
-
-  // 启动独立的端口监控
-  console.log('页面加载完成，启动端口监控')
   startIndependentPortMonitoring()
 })
 
 onUnmounted(() => {
-  stopAll()
+  clearTimers()
 })
 </script>
 
