@@ -19,7 +19,7 @@
           type="primary"
           @click="handleOpenRobotBrowser"
         >
-          1.打开机器人浏览器
+          启动机器人下载发票
         </el-button>
       </div>
 
