@@ -5,6 +5,7 @@
       <div class="logo">
         <h3>发票解析上传工具（河北）</h3>
       </div>
+
       <nav class="menu">
         <RouterLink to="/invoice-upload" class="menu-item">
           <span class="menu-icon">📤</span>
@@ -12,165 +13,258 @@
         </RouterLink>
       </nav>
 
-      <!-- 启动机器人按钮 -->
+      <!-- 启动机器人 -->
       <div class="sidebar-button-container">
         <el-button
           class="start-robot-btn"
           type="primary"
           @click="handleOpenRobotBrowser"
         >
-          启动机器人下载发票
+          {{ robotState === 'running' ? '停止监控' : '启动机器人下载发票' }}
         </el-button>
+
+        <!-- 重启间隔 -->
+        <div class="interval-setting">
+          <label>重启间隔(分钟):</label>
+          <input
+            v-model.number="restartIntervalMinutes"
+            type="number"
+          />
+        </div>
+
+        <!-- 端口状态 -->
+        <div class="port-status">
+          <span
+            class="status-indicator"
+            :class="portStatus"
+          >
+            端口 8082：{{ portStatus === 'online' ? '在线' : '离线' }}
+          </span>
+        </div>
+
+        <!-- 倒计时 -->
+        <div v-if="robotState === 'restarting' && remainingSeconds > 0" class="countdown">
+          <span class="countdown-text">
+            重启倒计时：{{ formatTime(remainingSeconds) }}
+          </span>
+        </div>
       </div>
 
-      <!-- 设置图标 -->
+      <!-- 设置 -->
       <div class="settings-container">
-        <el-button
-          class="settings-btn"
-          type="text"
-          @click="openSettingsDialog"
-        >
+        <el-button type="text" @click="openSettingsDialog">
           ⚙️ 设置
         </el-button>
       </div>
     </aside>
 
-    <!-- 主内容区域 -->
+    <!-- 主内容 -->
     <main class="main-content">
-      <RouterView/>
+      <RouterView />
     </main>
 
-    <!-- 设置对话框 -->
-    <el-dialog
-      v-model="settingsDialogVisible"
-      title="脚本配置"
-      width="500px"
-    >
+    <!-- 设置弹窗 -->
+    <el-dialog v-model="settingsDialogVisible" title="脚本配置" width="500px">
       <el-form :model="scriptConfig" label-width="100px">
         <el-form-item label="脚本文件">
           <el-input
             v-model="scriptConfig.scriptPath"
-            placeholder="请选择脚本文件"
-            style="width: 300px;"
-            readonly
             disabled
+            readonly
+            style="width: 300px"
           />
           <el-button
             type="primary"
+            style="margin-left: 10px"
             @click="selectScriptPath"
-            style="margin-left: 10px;"
           >
             选择文件
           </el-button>
         </el-form-item>
       </el-form>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="settingsDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="saveScriptConfig">保存</el-button>
-        </span>
+        <el-button @click="settingsDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveScriptConfig">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import {ref, onMounted} from "vue";
-import {ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElLoading} from "element-plus";
-import {robotApi} from "./api";
+import { ref, onMounted, onUnmounted } from 'vue'
+import { ElMessage, ElLoading } from 'element-plus'
 
+/* -------------------- 基础状态 -------------------- */
 
-// 设置对话框可见性
+type RobotState = 'idle' | 'running' | 'restarting'
+
+const robotState = ref<RobotState>('idle')
+const portStatus = ref<'online' | 'offline'>('offline')
+
+const restartIntervalMinutes = ref(30)
+const remainingSeconds = ref(0)
+
+/* -------------------- 定时器 -------------------- */
+
+const checkTimer = ref<NodeJS.Timeout | null>(null)
+const restartTimer = ref<NodeJS.Timeout | null>(null)
+const countdownTimer = ref<NodeJS.Timeout | null>(null)
+
+/* -------------------- 设置相关 -------------------- */
+
 const settingsDialogVisible = ref(false)
+const scriptConfig = ref({ scriptPath: '' })
 
-// 脚本配置
-const scriptConfig = ref({
-  scriptPath: ''
-})
+/* -------------------- 工具函数 -------------------- */
 
-// 打开设置对话框
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}分${secs}秒`
+}
+
 function openSettingsDialog() {
   settingsDialogVisible.value = true
 }
 
-// 选择脚本路径
 function selectScriptPath() {
-  // 只允许选择bat文件
-  const extensions = ['bat']
-  const filterName = '批处理文件'
-
-  // @ts-expect-error 调用Electron的文件选择器
+  // @ts-expect-error Electron
   window.electronAPI.showOpenDialog({
     properties: ['openFile'],
-    filters: [{name: filterName, extensions: extensions}],
+    filters: [{ name: '批处理文件', extensions: ['bat'] }],
     title: '选择脚本文件'
-  }).then(result => {
-    if (!result.canceled && result.filePaths.length > 0) {
-      scriptConfig.value.scriptPath = result.filePaths[0]
+  }).then((res: any) => {
+    if (!res.canceled && res.filePaths?.length) {
+      scriptConfig.value.scriptPath = res.filePaths[0]
     }
-  }).catch(err => {
-    console.error('选择文件失败:', err)
-    ElMessage.error('选择文件失败')
   })
 }
 
-// 保存脚本配置
 async function saveScriptConfig() {
   if (!scriptConfig.value.scriptPath) {
     ElMessage.warning('请选择脚本文件')
     return
   }
-
-  try {
-    // @ts-expect-error 调用Electron的API
-    await window.electronAPI.saveScriptConfig({
-      scriptPath: scriptConfig.value.scriptPath
-    })
-    ElMessage.success('配置保存成功')
-    settingsDialogVisible.value = false
-  } catch (error) {
-    console.error('保存配置失败:', error)
-    ElMessage.error(`保存配置失败: ${(error as Error).message}`)
-  }
+  // @ts-expect-error Electron
+  await window.electronAPI.saveScriptConfig(scriptConfig.value)
+  ElMessage.success('配置保存成功')
+  settingsDialogVisible.value = false
 }
 
-// 打开机器人浏览器（执行脚本）
+/* -------------------- 启动 / 停止 -------------------- */
+
 async function handleOpenRobotBrowser() {
+  if (robotState.value === 'running') {
+    stopAll()
+    ElMessage.info('已停止机器人监控')
+    return
+  }
+
+  const loading = ElLoading.service({
+    text: '正在启动机器人浏览器',
+    background: 'rgba(0,0,0,0.7)'
+  })
+
   try {
-    // 显示正在调用机器人浏览器的加载效果（使用 ElLoading.service 保持颜色一致）
-    const loadingInstance = ElLoading.service({
-      text: '正在调用机器人浏览器',
-      background: 'rgba(0, 0, 0, 0.8)'
-    })
-
-    // @ts-expect-error 调用Electron的API
-    await window.electronAPI.executeScript({command: 'restart'})
-
-    // 关闭加载效果
-    loadingInstance.close()
-
-    // 显示成功提示
-    ElMessage.success('正在打开机器人浏览器...')
-  } catch (error) {
-    console.error('执行脚本失败:', error)
-    ElMessage.error(`执行失败: ${(error as Error).message}`)
+    await restartRobot(false)
+    ElMessage.success('机器人启动成功')
+  } catch {
+    ElMessage.error('机器人启动失败')
+  } finally {
+    loading.close()
   }
 }
 
-// 初始化时加载配置
-onMounted(async () => {
+/* -------------------- 核心逻辑 -------------------- */
+
+async function restartRobot(showMessage = true) {
+  robotState.value = 'restarting'
+  clearTimers()
+
+  // @ts-expect-error Electron
+  await window.electronAPI.executeScript({ command: 'restart' })
+
+  robotState.value = 'running'
+
+  setTimeout(startPortMonitoring, 3000)
+  showMessage && ElMessage.success('机器人已重启')
+}
+
+function startPortMonitoring() {
+  clearTimers()
+  checkPortOnce()
+  checkTimer.value = setInterval(checkPortOnce, 5000)
+}
+
+async function checkPortOnce() {
+  if (robotState.value !== 'running') return
+
+  const controller = new AbortController()
+  const abortTimer = setTimeout(() => controller.abort(), 3000)
+
   try {
-    // @ts-expect-error 调用Electron的API
-    const config = await window.electronAPI.getScriptConfig()
-    // 只需要设置scriptPath
-    scriptConfig.value.scriptPath = config.scriptPath || ''
-  } catch (error) {
-    console.error('加载配置失败:', error)
-    ElMessage.error(`加载配置失败: ${(error as Error).message}`)
+    const res = await fetch('http://localhost:8082/status', {
+      signal: controller.signal
+    })
+    portStatus.value = res.ok ? 'online' : 'offline'
+    if (!res.ok) scheduleRestart()
+  } catch {
+    portStatus.value = 'offline'
+    scheduleRestart()
+  } finally {
+    clearTimeout(abortTimer)
   }
+}
+
+function scheduleRestart() {
+  if (robotState.value !== 'running') return
+
+  robotState.value = 'restarting'
+  clearTimers()
+
+  // 设置倒计时（转换为秒）
+  remainingSeconds.value = restartIntervalMinutes.value * 60
+
+  // 启动倒计时定时器
+  countdownTimer.value = setInterval(() => {
+    remainingSeconds.value--
+    if (remainingSeconds.value <= 0) {
+      clearInterval(countdownTimer.value!)
+      countdownTimer.value = null
+    }
+  }, 1000)
+
+  restartTimer.value = setTimeout(() => {
+    restartRobot()
+  }, restartIntervalMinutes.value * 60 * 1000)
+}
+
+/* -------------------- 清理 -------------------- */
+
+function clearTimers() {
+  checkTimer.value && clearInterval(checkTimer.value)
+  restartTimer.value && clearTimeout(restartTimer.value)
+  countdownTimer.value && clearInterval(countdownTimer.value)
+  checkTimer.value = null
+  restartTimer.value = null
+  countdownTimer.value = null
+}
+
+function stopAll() {
+  robotState.value = 'idle'
+  portStatus.value = 'offline'
+  remainingSeconds.value = 0
+  clearTimers()
+}
+
+onMounted(async () => {
+  // @ts-expect-error Electron
+  const cfg = await window.electronAPI.getScriptConfig()
+  scriptConfig.value.scriptPath = cfg?.scriptPath || ''
 })
 
-
+onUnmounted(stopAll)
 </script>
 
 <style scoped>
@@ -244,7 +338,7 @@ onMounted(async () => {
 
 .main-content {
   flex: 1;
-  overflow: hidden; /* 避免滚动条 */
+  overflow: hidden;
   background: var(--color-background);
   margin: 0;
   padding: 0;
@@ -280,20 +374,24 @@ onMounted(async () => {
   }
 
   .main-content {
-    overflow-y: auto; /* 移动端允许垂直滚动 */
+    overflow-y: auto;
   }
 }
 
-/* 侧边栏按钮容器 */
+/* 侧边栏按钮容器 - 绿色主题 */
 .sidebar-button-container {
-  padding: 0 20px;
+  padding: 16px 20px;
   margin-bottom: 40%;
+  margin-left: 10px;
+  margin-right: 10px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 12px;
+  background: linear-gradient(135deg, #e8f5f0 0%, #d4ebe3 100%);
+  border-radius: 8px;
+  border: 1px solid #42b88333;
 }
-
 
 /* 启动机器人按钮样式 */
 .start-robot-btn,
@@ -308,10 +406,148 @@ onMounted(async () => {
   cursor: pointer !important;
   transition: background-color 0.3s ease !important;
   box-shadow: none !important;
-
-  /* 确保对齐 */
   width: 100% !important;
   margin: 0 !important;
 }
 
+.start-robot-btn:hover,
+.el-button.start-robot-btn:hover {
+  background-color: #369970 !important;
+}
+
+/* 重启间隔设置 */
+.interval-setting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #42b88366;
+}
+
+.interval-setting label {
+  color: #2c3e50;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.interval-setting input {
+  width: 50px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.3s;
+  background: transparent;
+  text-align: center;
+}
+
+/* 隐藏数字输入框的上下箭头 */
+.interval-setting input[type="number"]::-webkit-inner-spin-button,
+.interval-setting input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.interval-setting input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.interval-setting input:focus {
+  background: rgba(66, 184, 131, 0.05);
+}
+
+/* 端口状态 */
+.port-status {
+  padding: 10px 12px;
+  background: white;
+  border-radius: 6px;
+  text-align: center;
+  border: 1px solid #42b88366;
+}
+
+.status-indicator {
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-indicator.online {
+  color: #42b883;
+}
+
+.status-indicator.online::before {
+  background: #42b883;
+  box-shadow: 0 0 8px rgba(66, 184, 131, 0.6);
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.offline {
+  color: #e74c3c;
+}
+
+.status-indicator.offline::before {
+  background: #e74c3c;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 设置容器 */
+.settings-container {
+  padding: 0 20px;
+  margin-top: auto;
+}
+
+.settings-container .el-button {
+  color: #42b883;
+  font-size: 14px;
+}
+
+.settings-container .el-button:hover {
+  color: #369970;
+}
+
+/* 倒计时 */
+.countdown {
+  padding: 10px 12px;
+  background: white;
+  border-radius: 6px;
+  text-align: center;
+  border: 1px solid #42b88366;
+}
+
+.countdown-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #f39c12;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.countdown-text::before {
+  content: '⏱️';
+  font-size: 14px;
+}
 </style>
