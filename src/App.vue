@@ -47,6 +47,14 @@
           <span class="countdown-text">
             重启倒计时：{{ formatTime(remainingSeconds) }}
           </span>
+          <el-button
+            size="small"
+            type="danger"
+            @click="cancelRestart"
+            style="margin-left: 10px;"
+          >
+            取消重启
+          </el-button>
         </div>
       </div>
 
@@ -102,7 +110,7 @@ type RobotState = 'idle' | 'running' | 'restarting'
 const robotState = ref<RobotState>('idle')
 const portStatus = ref<'online' | 'offline'>('offline')
 
-const restartIntervalMinutes = ref(30)
+const restartIntervalMinutes = ref(1)
 const remainingSeconds = ref(0)
 
 /* -------------------- 定时器 -------------------- */
@@ -137,7 +145,11 @@ function selectScriptPath() {
   }).then((res: any) => {
     if (!res.canceled && res.filePaths?.length) {
       scriptConfig.value.scriptPath = res.filePaths[0]
+      console.log('已选择脚本:', scriptConfig.value.scriptPath)
     }
+  }).catch((error: any) => {
+    console.error('选择文件失败:', error)
+    ElMessage.error('选择文件失败')
   })
 }
 
@@ -146,18 +158,68 @@ async function saveScriptConfig() {
     ElMessage.warning('请选择脚本文件')
     return
   }
-  // @ts-expect-error Electron
-  await window.electronAPI.saveScriptConfig(scriptConfig.value)
-  ElMessage.success('配置保存成功')
-  settingsDialogVisible.value = false
+
+  const loading = ElLoading.service({
+    text: '正在保存配置...',
+    background: 'rgba(0,0,0,0.7)'
+  })
+
+  try {
+    console.log('开始保存配置:', scriptConfig.value)
+
+    // 检查 API 是否存在
+    // @ts-expect-error Electron
+    if (!window.electronAPI?.saveScriptConfig) {
+      throw new Error('保存配置接口不存在')
+    }
+
+    // 创建纯净的配置对象（只包含可序列化的数据）
+    const configToSave = {
+      scriptPath: scriptConfig.value.scriptPath
+    }
+
+    // @ts-expect-error Electron
+    const result = await Promise.race([
+      window.electronAPI.saveScriptConfig(configToSave),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('保存超时')), 5000)
+      )
+    ])
+
+    console.log('保存结果:', result)
+    ElMessage.success('配置保存成功')
+    settingsDialogVisible.value = false
+  } catch (error: any) {
+    console.error('保存配置失败:', error)
+    ElMessage.error(error.message || '配置保存失败，请重试')
+  } finally {
+    loading.close()
+  }
 }
 
 /* -------------------- 启动 / 停止 -------------------- */
 
 async function handleOpenRobotBrowser() {
   if (robotState.value === 'running') {
-    stopAll()
-    ElMessage.info('已停止机器人监控')
+    // 停止监控时调用脚本的 stop 命令
+    const loading = ElLoading.service({
+      text: '正在停止机器人...',
+      background: 'rgba(0,0,0,0.7)'
+    })
+
+    try {
+      console.log('调用脚本 stop 命令...')
+      // @ts-expect-error Electron
+      await window.electronAPI.executeScript({ command: 'stop' })
+      console.log('脚本 stop 命令执行完成')
+      ElMessage.success('机器人已停止')
+    } catch (error: any) {
+      console.error('停止机器人异常:', error)
+      ElMessage.warning('机器人停止命令已发送')
+    } finally {
+      loading.close()
+      stopAll()
+    }
     return
   }
 
@@ -167,12 +229,62 @@ async function handleOpenRobotBrowser() {
   })
 
   try {
+    console.log('开始启动机器人...')
     await restartRobot(false)
+    console.log('机器人启动完成')
     ElMessage.success('机器人启动成功')
-  } catch {
-    ElMessage.error('机器人启动失败')
+  } catch (error: any) {
+    console.error('机器人启动异常:', error)
+    console.error('错误详情:', error.message, error.stack)
+
+    // 即使有错误，如果浏览器已经打开，也认为是成功的
+    ElMessage.warning('机器人已启动，但可能有警告信息')
+
+    // 仍然启动监控
+    robotState.value = 'running'
+    setTimeout(() => {
+      startPortMonitoring()
+    }, 3000)
   } finally {
     loading.close()
+  }
+}
+
+// 独立的端口监控函数 - 不依赖机器人状态
+function startIndependentPortMonitoring() {
+  console.log('启动独立端口监控')
+
+  // 立即检测一次
+  checkPortIndependently()
+
+  // 每1秒检测一次
+  checkTimer.value = setInterval(checkPortIndependently, 1000)
+}
+
+async function checkPortIndependently() {
+  try {
+    // @ts-expect-error Electron
+    if (!window.electronAPI?.checkPort) {
+      console.error('checkPort 方法不存在')
+      return
+    }
+
+    // @ts-expect-error Electron
+    const result = await window.electronAPI.checkPort(8082)
+
+    if (result && result.isListening) {
+      portStatus.value = 'online'
+    } else {
+      portStatus.value = 'offline'
+
+      // 只有在机器人运行状态下才触发重启
+      if (robotState.value === 'running') {
+        scheduleRestart()
+      }
+    }
+  } catch (error) {
+    console.log('独立端口检测失败:', error)
+    portStatus.value = 'offline'
   }
 }
 
@@ -194,26 +306,29 @@ async function restartRobot(showMessage = true) {
 function startPortMonitoring() {
   clearTimers()
   checkPortOnce()
-  checkTimer.value = setInterval(checkPortOnce, 5000)
+  checkTimer.value = setInterval(checkPortOnce, 1000) // 1秒检测一次
 }
 
 async function checkPortOnce() {
   if (robotState.value !== 'running') return
 
-  const controller = new AbortController()
-  const abortTimer = setTimeout(() => controller.abort(), 3000)
-
   try {
-    const res = await fetch('http://localhost:8082/status', {
-      signal: controller.signal
-    })
-    portStatus.value = res.ok ? 'online' : 'offline'
-    if (!res.ok) scheduleRestart()
-  } catch {
+    // 使用 netstat 命令检查端口
+    // @ts-expect-error Electron
+    const result = await window.electronAPI.checkPort(8082)
+
+    console.log('端口检测结果:', result)
+
+    if (result && result.isListening) {
+      portStatus.value = 'online'
+    } else {
+      portStatus.value = 'offline'
+      scheduleRestart()
+    }
+  } catch (error) {
+    console.log('端口检测失败:', error)
     portStatus.value = 'offline'
     scheduleRestart()
-  } finally {
-    clearTimeout(abortTimer)
   }
 }
 
@@ -262,9 +377,15 @@ onMounted(async () => {
   // @ts-expect-error Electron
   const cfg = await window.electronAPI.getScriptConfig()
   scriptConfig.value.scriptPath = cfg?.scriptPath || ''
+
+  // 启动独立的端口监控
+  console.log('页面加载完成，启动端口监控')
+  startIndependentPortMonitoring()
 })
 
-onUnmounted(stopAll)
+onUnmounted(() => {
+  stopAll()
+})
 </script>
 
 <style scoped>
@@ -535,6 +656,10 @@ onUnmounted(stopAll)
   border-radius: 6px;
   text-align: center;
   border: 1px solid #42b88366;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .countdown-text {
@@ -549,5 +674,10 @@ onUnmounted(stopAll)
 .countdown-text::before {
   content: '⏱️';
   font-size: 14px;
+}
+
+.countdown .el-button {
+  padding: 4px 12px !important;
+  font-size: 12px !important;
 }
 </style>

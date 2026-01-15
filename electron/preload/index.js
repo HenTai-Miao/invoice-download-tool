@@ -33,11 +33,13 @@ const electronAPI = {
     ipcRenderer.on('upload-history-update', (_, data) => callback(data)),
 
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
-  
+
   // 脚本配置和执行API
   getScriptConfig: () => ipcRenderer.invoke('get-script-config'),
   saveScriptConfig: (config) => ipcRenderer.invoke('save-script-config', config),
-  executeScript: (command) => ipcRenderer.invoke('execute-script', command)
+  executeScript: (command) => ipcRenderer.invoke('execute-script', command),
+
+  checkPort: (port) => ipcRenderer.invoke('check-port', port)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

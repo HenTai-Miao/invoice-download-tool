@@ -3,10 +3,13 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'fs/promises'
 import fsSync from 'node:fs'
-import { exec, execSync } from 'node:child_process'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'  // 添加这一行
 import axios from 'axios'
 import FormData from 'form-data'
 import os from 'node:os'
+
+const execPromise = promisify(exec)
 
 // 获取 __dirname 的 ES 模块等效方式
 const __filename = fileURLToPath(import.meta.url)
@@ -33,7 +36,7 @@ function ensureLogsDirExists() {
 function updateLogFile() {
   const today = new Date().toISOString().split('T')[0]
   const expectedLogFile = path.join(LOGS_DIR, `${today}.log`)
-  
+
   // 如果不是同一天，则更新日志文件路径
   if (LOG_FILE !== expectedLogFile) {
     LOG_FILE = expectedLogFile
@@ -48,7 +51,7 @@ function logToFile(message) {
   try {
     // 检查并更新日志文件路径
     updateLogFile()
-    
+
     const timestamp = new Date().toISOString()
     const logEntry = `${timestamp} - ${message}\n`
     fsSync.appendFileSync(LOG_FILE, logEntry, 'utf8')
@@ -268,28 +271,28 @@ if (!gotTheLock) {
       console.log('执行时间:', startTime.toISOString())
       console.log('执行脚本路径:', fullPath)
       console.log('执行命令参数:', command)
-      
+
       // 检查脚本文件是否存在
       if (!fsSync.existsSync(fullPath)) {
         console.error('脚本文件不存在:', fullPath)
         reject(new Error(`执行脚本失败: 脚本文件不存在 - ${fullPath}`))
         return
       }
-      
+
       // 添加环境变量调试信息
       console.log('当前工作目录:', process.cwd())
       console.log('当前PATH环境变量:', process.env.PATH)
       console.log('当前平台:', process.platform)
-      
+
       // 获取脚本所在目录和扩展名
       const scriptDir = path.dirname(fullPath)
       const scriptExt = path.extname(fullPath).toLowerCase()
       console.log('脚本所在目录:', scriptDir)
       console.log('脚本扩展名:', scriptExt)
-      
+
       // 定义不同平台和文件类型的执行方式
       let execCommand;
-      
+
       // 强制Windows批处理文件使用cmd.exe执行，无论平台检测结果如何
       if (scriptExt === '.bat' || scriptExt === '.cmd') {
         // .bat/.cmd批处理文件，直接用cmd.exe执行
@@ -314,11 +317,11 @@ if (!gotTheLock) {
           execCommand = `\"${fullPath}\" ${command}`
         }
       }
-      
+
       console.log('最终执行命令:', execCommand)
-      
+
       // 使用exec执行命令，捕获完整的错误信息
-      exec(execCommand, { 
+      exec(execCommand, {
         // 设置当前工作目录为脚本所在目录，确保jar文件能被正确找到
         cwd: scriptDir,
         // 设置环境变量，确保继承用户的PATH
@@ -339,18 +342,18 @@ if (!gotTheLock) {
           stdout: stdout,
           stderr: stderr
         })
-        
+
         if (error) {
           console.error('执行脚本错误:', error)
           console.error('stderr:', stderr)
           console.error('stdout:', stdout)
-          
+
           // 提供详细的错误信息
           let errorMsg = `执行脚本失败: `
           if (stderr) errorMsg += stderr.trim()
           else if (stdout) errorMsg += stdout.trim()
           else errorMsg += error.message
-          
+
           reject(new Error(errorMsg))
         } else {
           // 执行成功
@@ -761,7 +764,7 @@ if (!gotTheLock) {
       if (!config.scriptPath) {
         throw new Error('脚本配置未完成，请先配置脚本文件')
       }
-      
+
       // 如果是restart命令，设置7小时后自动执行stop命令
       if (command === 'restart') {
         // 取消之前的计时器
@@ -769,7 +772,7 @@ if (!gotTheLock) {
           clearTimeout(autoStopTimer)
           console.log('已取消之前的自动停止计时器')
         }
-        
+
         // 设置新的计时器，7小时后执行stop命令
         autoStopTimer = setTimeout(async () => {
           console.log('7小时时间到，自动执行stop命令')
@@ -782,10 +785,10 @@ if (!gotTheLock) {
           // 计时器执行后清空
           autoStopTimer = null
         }, AUTO_STOP_DELAY)
-        
+
         console.log('已设置7小时后自动执行stop命令的计时器')
       }
-      
+
       // 不再需要scriptName参数，传递完整路径即可
       return await executeScript(config.scriptPath, '', command)
     } catch (error) {
@@ -811,7 +814,7 @@ if (!gotTheLock) {
           __dirname,
           process.env.VITE_DEV_SERVER_URL ? '../public/favicon.ico' : 'favicon.ico'
         ),"123");
-    
+
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
@@ -944,6 +947,25 @@ if (!gotTheLock) {
 
     if (process.platform !== 'darwin') {
       app.quit()
+    }
+  })
+
+  ipcMain.handle('check-port', async (event, port) => {
+    try {
+      const { stdout } = await execPromise(`netstat -ano | findstr :${port}`)
+      const isListening = stdout.includes('LISTENING')
+
+      return {
+        isListening,
+        port,
+        output: stdout
+      }
+    } catch (error) {
+      return {
+        isListening: false,
+        port,
+        error: error.message
+      }
     }
   })
 

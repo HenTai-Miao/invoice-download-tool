@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=发票解析上传工具
-Comment=用于处理发票相关业务
-Exec=/opt/invoice-parse-upload-tool/invoice-parse-upload-tool
-Icon=/opt/invoice-parse-upload-tool/resources/app.asar.unpacked/build/icon.png
-Terminal=false
-Type=Application
-Categories=Office;
-X-Ubuntu-Gettext-Domain=invoice-download-tool
