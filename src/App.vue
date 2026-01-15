@@ -11,7 +11,7 @@
           <span class="menu-text">发票解析上传</span>
         </RouterLink>
       </nav>
-      
+
       <!-- 启动机器人按钮 -->
       <div class="sidebar-button-container">
         <el-button
@@ -20,22 +20,6 @@
           @click="handleOpenRobotBrowser"
         >
           1.打开机器人浏览器
-        </el-button>
-        2.在机器人浏览器打开并登录电子税务局
-        <el-button
-          class="start-robot-btn"
-          type="primary"
-          @click="copyAddress"
-        >
-          点击此处复制电子税务局地址
-        </el-button>
-        
-        <el-button
-          class="start-robot-btn"
-          type="primary"
-          @click="handleStartRobot"
-        >
-          3.我已登陆，开始执行机器人
         </el-button>
       </div>
 
@@ -53,7 +37,7 @@
 
     <!-- 主内容区域 -->
     <main class="main-content">
-      <RouterView />
+      <RouterView/>
     </main>
 
     <!-- 设置对话框 -->
@@ -91,20 +75,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import { ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElLoading } from "element-plus";
-import { robotApi } from "./api";
-// 河北电子税务局
-// 请求参数
-const params = 'hebei'
-// 电子税务局地址
-const taxOfficeAddress = 'http://hebei.chinatax.gov.cn/hbsw/index.html'
+import {ref, onMounted} from "vue";
+import {ElButton, ElMessage, ElDialog, ElForm, ElFormItem, ElInput, ElLoading} from "element-plus";
+import {robotApi} from "./api";
 
-// // 北京电子税务局
-// // 请求参数
-// const params = 'beijing'
-// // 电子税务局地址
-// const taxOfficeAddress = 'https://etax.beijing.chinatax.gov.cn:8443/'
 
 // 设置对话框可见性
 const settingsDialogVisible = ref(false)
@@ -128,7 +102,7 @@ function selectScriptPath() {
   // @ts-expect-error 调用Electron的文件选择器
   window.electronAPI.showOpenDialog({
     properties: ['openFile'],
-    filters: [{ name: filterName, extensions: extensions }],
+    filters: [{name: filterName, extensions: extensions}],
     title: '选择脚本文件'
   }).then(result => {
     if (!result.canceled && result.filePaths.length > 0) {
@@ -170,40 +144,17 @@ async function handleOpenRobotBrowser() {
     })
 
     // @ts-expect-error 调用Electron的API
-    await window.electronAPI.executeScript({ command: 'restart' })
-    
+    await window.electronAPI.executeScript({command: 'restart'})
+
     // 关闭加载效果
     loadingInstance.close()
-    
+
     // 显示成功提示
     ElMessage.success('正在打开机器人浏览器...')
   } catch (error) {
     console.error('执行脚本失败:', error)
     ElMessage.error(`执行失败: ${(error as Error).message}`)
   }
-}
-
-// 处理启动机器人按钮点击
-async function handleStartRobot() {
-  // 使用Element Plus的消息提示
-  ElMessage({
-      message: '机器人开始执行...',
-      type: 'success',
-      duration: 1500
-  });
-  
-  const result = await robotApi({taxSite: params});
-  console.log('机器人调用接口:', result);
-}
-
-// 复制地址功能
-async function copyAddress() {
-  await navigator.clipboard.writeText(taxOfficeAddress);
-  ElMessage({
-      message: '地址已成功复制！',
-      type: 'success',
-      duration: 2000
-  });
 }
 
 // 初始化时加载配置
@@ -304,34 +255,35 @@ onMounted(async () => {
   .layout {
     flex-direction: column;
   }
-  
+
   .sidebar {
     width: 100%;
     height: auto;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
   }
-  
+
   .menu {
     flex-direction: row;
     overflow-x: auto;
   }
-  
+
   .menu-item {
     border-left: none;
     border-bottom: 3px solid transparent;
     white-space: nowrap;
   }
-  
+
   .menu-item.router-link-exact-active {
     border-left: none;
     border-bottom: 3px solid #42b883;
   }
-  
+
   .main-content {
     overflow-y: auto; /* 移动端允许垂直滚动 */
   }
 }
+
 /* 侧边栏按钮容器 */
 .sidebar-button-container {
   padding: 0 20px;
@@ -341,7 +293,6 @@ onMounted(async () => {
   align-items: stretch;
   gap: 12px;
 }
-
 
 
 /* 启动机器人按钮样式 */
@@ -357,7 +308,7 @@ onMounted(async () => {
   cursor: pointer !important;
   transition: background-color 0.3s ease !important;
   box-shadow: none !important;
-  
+
   /* 确保对齐 */
   width: 100% !important;
   margin: 0 !important;
