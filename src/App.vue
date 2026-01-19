@@ -209,12 +209,17 @@ function startIndependentPortMonitoring() {
   }, 2000)
 }
 
-// 5. 触发重启倒计时
+// 5. 触发重启倒计时（添加随机时间）
 function scheduleRestart() {
   if (robotState.value !== 'running') return
 
   robotState.value = 'restarting'
-  remainingSeconds.value = restartIntervalMinutes.value * 60
+
+  // 添加1-59秒的随机时间
+  const randomSeconds = Math.floor(Math.random() * 59) + 1
+  const totalSeconds = restartIntervalMinutes.value * 60 + randomSeconds
+
+  remainingSeconds.value = totalSeconds
 
   // 倒计时显示
   countdownTimer.value = setInterval(() => {
@@ -235,7 +240,7 @@ function scheduleRestart() {
         console.error('自动重启失败')
       }
     }
-  }, restartIntervalMinutes.value * 60 * 1000)
+  }, totalSeconds * 1000)
 }
 
 /* -------------------- Electron 文件操作 -------------------- */
