@@ -12,7 +12,7 @@
           <div v-if="files.length === 0" class="empty-container">
             <p class="no-content">暂无 ZIP 文件</p>
           </div>
-          
+
           <div v-for="f in files" :key="f.name" class="item">
             <div class="content">
               <div class="header">
@@ -21,7 +21,7 @@
                   <span class="size">{{ formatFileSize(f.size) }}</span>
                 </span>
               </div>
-              
+
               <!-- 状态显示 -->
               <div class="status-container">
                 <span v-if="f.status === 'pending'" class="status pending">
@@ -56,7 +56,7 @@
           <div v-if="uploadHistory.length === 0" class="empty-container">
             <p class="no-content">暂无上传历史记录</p>
           </div>
-          
+
           <div v-else class="content-list">
             <div v-for="item in uploadHistory" :key="item.name" class="item">
               <div class="content">
@@ -111,23 +111,23 @@ onMounted(async () => {
   console.log('Window对象:', window);
   const { electronAPI } = window as any;
   console.log('ElectronAPI:', electronAPI);
-  
+
   if (electronAPI) {
     // 接收文件状态更新
   electronAPI.onFileStatusUpdate((fileStatusList: FileItem[]) => {
     console.log('接收到文件状态更新:', fileStatusList);
-    
+
     // 直接使用后端发送的完整文件状态列表，不保留已完成的文件
     // 因为已完成的文件会自动转移到历史记录中
     files.value = fileStatusList;
   });
-    
+
     // 接收上传历史更新
     electronAPI.onUploadHistoryUpdate((historyList: HistoryItem[]) => {
       console.log('接收到上传历史更新:', historyList);
       uploadHistory.value = historyList;
     });
-    
+
     // 主动获取上传历史记录，确保页面刷新后能立即显示
     try {
       const history = await electronAPI.getUploadHistory();
