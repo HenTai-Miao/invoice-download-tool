@@ -21,7 +21,7 @@ const STATE_FILE = path.join(BASE_DIR, 'upload-state.json')
 const SCRIPT_CONFIG_FILE = path.join(app.getPath('userData'), 'script-config.json')
 
 const UPLOAD_API_URL =
-  'http://192.168.111.105:8083/zz-resource/oss/endpoint/invoice-put-file'
+  'http://10.141.24.63:8083/zz-resource/oss/endpoint/invoice-put-file'
 
 const MAX_CONCURRENT = 3
 const CHECK_INTERVAL = 5000
