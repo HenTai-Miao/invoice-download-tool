@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, dialog, globalShortcut } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'fs/promises'
@@ -6,6 +6,8 @@ import fsSync from 'node:fs'
 import axios from 'axios'
 import FormData from 'form-data'
 import os from 'node:os'
+import { spawn } from 'node:child_process'
+import net from 'node:net'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -16,6 +18,7 @@ const BASE_DIR = path.join(os.tmpdir(), 'invoice')
 const PENDING_UPLOAD_DIR = path.join(BASE_DIR, 'pending-upload')
 const UPLOADED_DIR = path.join(BASE_DIR, 'uploaded')
 const STATE_FILE = path.join(BASE_DIR, 'upload-state.json')
+const SCRIPT_CONFIG_FILE = path.join(app.getPath('userData'), 'script-config.json')
 
 const UPLOAD_API_URL =
   'http://192.168.111.105:8083/zz-resource/oss/endpoint/invoice-put-file'
@@ -30,6 +33,7 @@ const MAX_HISTORY = 200
 /* ===================== 运行态 ===================== */
 
 let mainWindow
+let scriptProcess = null // 脚本进程引用
 const fileStatusMap = new Map()
 const processingFiles = new Set()
 const uploadHistory = []
@@ -227,7 +231,25 @@ app.whenReady().then(async () => {
 
   process.env.VITE_DEV_SERVER_URL
     ? mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    : mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    : mainWindow.loadFile(path.join(__dirname, './renderer/index.html'))
+
+  // 注册快捷键：Ctrl+Shift+I 打开/关闭开发者工具
+  globalShortcut.register('CommandOrControl+Shift+I', () => {
+    if (mainWindow) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools()
+      } else {
+        mainWindow.webContents.openDevTools()
+      }
+    }
+  })
+
+  // 注册快捷键：F5 刷新页面
+  globalShortcut.register('F5', () => {
+    if (mainWindow) {
+      mainWindow.webContents.reload()
+    }
+  })
 
   // 立即执行一次队列检查
   checkQueue()
@@ -255,3 +277,163 @@ app.whenReady().then(async () => {
 })
 
 ipcMain.handle('get-upload-history', () => uploadHistory)
+
+// 显示文件选择对话框
+ipcMain.handle('show-open-dialog', async (event, options) => {
+  return await dialog.showOpenDialog(options)
+})
+
+// 获取脚本配置
+ipcMain.handle('get-script-config', async () => {
+  try {
+    const data = await fs.readFile(SCRIPT_CONFIG_FILE, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    return { scriptPath: '' }
+  }
+})
+
+// 保存脚本配置
+ipcMain.handle('save-script-config', async (event, config) => {
+  try {
+    await fs.mkdir(path.dirname(SCRIPT_CONFIG_FILE), { recursive: true })
+    await fs.writeFile(SCRIPT_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8')
+    return { success: true }
+  } catch (error) {
+    console.error('保存脚本配置失败:', error)
+    throw error
+  }
+})
+
+// 执行脚本
+ipcMain.handle('execute-script', async (event, options) => {
+  const { command } = options
+
+  try {
+    // 获取脚本路径
+    const config = await fs.readFile(SCRIPT_CONFIG_FILE, 'utf-8').then(JSON.parse).catch(() => ({ scriptPath: '' }))
+
+    if (!config.scriptPath) {
+      throw new Error('请先配置脚本文件路径')
+    }
+
+    // 检查脚本文件是否存在
+    if (!fsSync.existsSync(config.scriptPath)) {
+      throw new Error('脚本文件不存在：' + config.scriptPath)
+    }
+
+    console.log(`[脚本执行] 命令: ${command}, 脚本路径: ${config.scriptPath}`)
+
+    if (command === 'stop') {
+      // 调用脚本的 stop 命令
+      return new Promise((resolve, reject) => {
+        const stopProcess = spawn(config.scriptPath, ['stop'], {
+          shell: true,
+          cwd: path.dirname(config.scriptPath),
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+
+        let output = ''
+        stopProcess.stdout?.on('data', (data) => {
+          output += data.toString()
+          console.log('[脚本输出-stop]', data.toString())
+        })
+
+        stopProcess.stderr?.on('data', (data) => {
+          console.error('[脚本错误-stop]', data.toString())
+        })
+
+        stopProcess.on('close', (code) => {
+          console.log(`[脚本执行] stop 命令完成，退出码: ${code}`)
+          // 清理可能存在的 scriptProcess
+          if (scriptProcess) {
+            scriptProcess.kill()
+            scriptProcess = null
+          }
+          resolve({ success: true, message: '脚本已停止', output })
+        })
+
+        stopProcess.on('error', (err) => {
+          console.error('[脚本执行] stop 命令失败:', err)
+          reject(err)
+        })
+      })
+    }
+
+    if (command === 'restart') {
+      // 先停止旧进程
+      if (scriptProcess) {
+        scriptProcess.kill()
+        scriptProcess = null
+      }
+
+      // 使用脚本的 restart 命令
+      scriptProcess = spawn(config.scriptPath, ['restart'], {
+        shell: true,
+        cwd: path.dirname(config.scriptPath),
+        detached: false,
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+
+      scriptProcess.stdout?.on('data', (data) => {
+        console.log('[脚本输出-restart]', data.toString())
+      })
+
+      scriptProcess.stderr?.on('data', (data) => {
+        console.error('[脚本错误-restart]', data.toString())
+      })
+
+      scriptProcess.on('error', (err) => {
+        console.error('[脚本执行] restart 命令错误:', err)
+      })
+
+      scriptProcess.on('exit', (code) => {
+        console.log(`[脚本执行] restart 命令退出，退出码: ${code}`)
+        scriptProcess = null
+      })
+
+      return { success: true, message: '脚本已启动' }
+    }
+
+    throw new Error('未知命令：' + command)
+  } catch (error) {
+    console.error('[脚本执行] 失败:', error)
+    throw error
+  }
+})
+
+// 检查端口
+ipcMain.handle('check-port', async (event, port) => {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    const timeout = 2000
+
+    socket.setTimeout(timeout)
+
+    socket.on('connect', () => {
+      socket.destroy()
+      resolve({ isListening: true })
+    })
+
+    socket.on('timeout', () => {
+      socket.destroy()
+      resolve({ isListening: false })
+    })
+
+    socket.on('error', () => {
+      resolve({ isListening: false })
+    })
+
+    socket.connect(port, '127.0.0.1')
+  })
+})
+
+// 应用退出前注销所有快捷键并清理脚本进程
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  // 清理脚本进程
+  if (scriptProcess) {
+    scriptProcess.kill()
+    scriptProcess = null
+  }
+})

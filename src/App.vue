@@ -2,7 +2,7 @@
   <div class="layout">
     <aside class="sidebar">
       <div class="logo">
-        <h3>发票解析上传工具（河北）</h3>
+        <h3>发票解析上传工具（北京）</h3>
       </div>
 
       <nav class="menu">
@@ -13,7 +13,9 @@
       </nav>
 
       <div class="sidebar-button-container">
+        <!-- 启动/停止按钮：只在 idle 或 running 状态显示 -->
         <el-button
+          v-if="robotState !== 'restarting'"
           class="start-robot-btn"
           :type="robotState === 'running' ? 'danger' : 'primary'"
           @click="handleOpenRobotBrowser"
@@ -39,6 +41,7 @@
           </span>
         </div>
 
+        <!-- 重启倒计时：只在 restarting 状态显示 -->
         <div v-if="robotState === 'restarting' && remainingSeconds > 0" class="countdown">
           <div class="countdown-info">
             <span class="countdown-text">
@@ -66,6 +69,13 @@
 
     <main class="main-content">
       <RouterView />
+      <!-- 操作过程中的透明遮罩层 -->
+      <div v-if="operationLoading" class="operation-overlay">
+        <div class="loading-spinner">
+          <div class="spinner"></div>
+          <p class="loading-text">{{ loadingText }}</p>
+        </div>
+      </div>
     </main>
 
     <el-dialog v-model="settingsDialogVisible" title="脚本配置" width="500px">
@@ -97,7 +107,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElLoading } from 'element-plus'
+import { ElMessage } from 'element-plus'
 
 /* -------------------- 基础状态 -------------------- */
 type RobotState = 'idle' | 'running' | 'restarting'
@@ -106,11 +116,15 @@ const robotState = ref<RobotState>('idle')
 const portStatus = ref<'online' | 'offline'>('offline')
 const restartIntervalMinutes = ref(1)
 const remainingSeconds = ref(0)
+const operationLoading = ref(false) // 操作中的loading状态
+const loadingText = ref('') // loading提示文本
+const serviceStartCount = ref(0) // 启动服务计数：0=未启动，1=已启动过
 
 /* -------------------- 定时器句柄 -------------------- */
 const checkTimer = ref<NodeJS.Timeout | null>(null)
 const restartTimer = ref<NodeJS.Timeout | null>(null)
 const countdownTimer = ref<NodeJS.Timeout | null>(null)
+let justStartedTimestamp = 0 // 记录刚启动的时间戳，避免立即触发重启
 
 /* -------------------- 设置相关 -------------------- */
 const settingsDialogVisible = ref(false)
@@ -146,72 +160,171 @@ async function handleOpenRobotBrowser() {
     return
   }
 
-  const loading = ElLoading.service({ text: '正在启动机器人...', background: 'rgba(0,0,0,0.7)' })
+  operationLoading.value = true
+  loadingText.value = '正在启动服务...'
+  const startTime = Date.now()
+
   try {
-    // 执行重启命令（作为初始化启动）
+    // 先检测 8082 端口是否已在运行
     // @ts-expect-error Electron
-    await window.electronAPI.executeScript({ command: 'restart' })
-    robotState.value = 'running'
-    ElMessage.success('机器人启动成功')
+    const result = await window.electronAPI.checkPort(8082)
+
+    if (result?.isListening) {
+      // 端口已在运行，直接转换为 running 状态
+      robotState.value = 'running'
+      portStatus.value = 'online'
+
+      // 确保遮罩至少显示800毫秒
+      const elapsed = Date.now() - startTime
+      const delay = Math.max(0, 800 - elapsed)
+      await new Promise(resolve => setTimeout(resolve, delay))
+
+      operationLoading.value = false
+      // 启动成功，计数设为 1
+      serviceStartCount.value = 1
+      console.log('服务启动成功，启动计数:', serviceStartCount.value)
+      ElMessage.success('服务启动成功')
+      // 启动端口监控，以便在应用离线时触发重启倒计时
+      startIndependentPortMonitoring()
+    } else {
+      // 端口未运行，执行启动脚本
+      await window.electronAPI.executeScript({ command: 'restart' })
+
+      // 记录启动时间，避免立即触发重启倒计时
+      justStartedTimestamp = Date.now()
+
+      robotState.value = 'running'
+      portStatus.value = 'offline' // 初始状态设为离线，等待脚本启动
+
+      // 确保遮罩至少显示800毫秒
+      const elapsed = Date.now() - startTime
+      const delay = Math.max(0, 800 - elapsed)
+      await new Promise(resolve => setTimeout(resolve, delay))
+
+      operationLoading.value = false
+      // 启动成功，计数设为 1
+      serviceStartCount.value = 1
+      console.log('服务启动成功，启动计数:', serviceStartCount.value)
+      ElMessage.success('服务启动成功')
+      // 启动端口监控
+      startIndependentPortMonitoring()
+    }
   } catch (error: any) {
     console.error('启动异常:', error)
-    ElMessage.warning('启动命令已发送，请检查浏览器是否打开')
-    robotState.value = 'running'
-  } finally {
-    loading.close()
+    operationLoading.value = false
+    ElMessage.error('启动失败，请检查脚本配置')
   }
 }
 
 // 2. 停止机器人服务（通用停止逻辑）
 async function stopRobotService() {
-  const loading = ElLoading.service({ text: '正在停止服务...', background: 'rgba(0,0,0,0.7)' })
+  operationLoading.value = true
+  loadingText.value = '正在停止服务...'
+  const startTime = Date.now()
+
   try {
+    // 清除所有定时器
     clearTimers()
+    remainingSeconds.value = 0
+
+    // 重置启动时间戳
+    justStartedTimestamp = 0
+
     // @ts-expect-error Electron
     await window.electronAPI.executeScript({ command: 'stop' })
+
     robotState.value = 'idle'
     portStatus.value = 'offline'
-    remainingSeconds.value = 0
-    ElMessage.success('服务已停止')
 
-    // 停止后重新开启独立的纯监测模式
-    startIndependentPortMonitoring()
+    // 确保遮罩至少显示800毫秒
+    const elapsed = Date.now() - startTime
+    const delay = Math.max(0, 800 - elapsed)
+    await new Promise(resolve => setTimeout(resolve, delay))
+
+    operationLoading.value = false
+    // 停止服务，计数重置为 0
+    serviceStartCount.value = 0
+    console.log('服务停止，启动计数重置为:', serviceStartCount.value)
+    ElMessage.success('服务停止成功')
   } catch (error) {
-    ElMessage.error('停止服务失败')
-  } finally {
-    loading.close()
+    console.error('停止服务异常:', error)
+    operationLoading.value = false
+    ElMessage.error('停止服务失败，请检查脚本配置')
+    robotState.value = 'idle'
+    // 即使停止失败，也重置计数
+    serviceStartCount.value = 0
   }
 }
 
 // 3. 取消重启按钮逻辑
 async function cancelRestart() {
   console.log('用户手动取消重启')
-  // 核心逻辑：清除计时器 -> 状态设为闲置 -> 调用 stop 命令
+  // 清除倒计时相关定时器
+  if (countdownTimer.value) {
+    clearInterval(countdownTimer.value)
+    countdownTimer.value = null
+  }
+  if (restartTimer.value) {
+    clearTimeout(restartTimer.value)
+    restartTimer.value = null
+  }
+  remainingSeconds.value = 0
+
+  // 重置启动时间戳
+  justStartedTimestamp = 0
+
+  // 调用停止服务
   await stopRobotService()
 }
 
 // 4. 端口监控逻辑
 function startIndependentPortMonitoring() {
   if (checkTimer.value) clearInterval(checkTimer.value)
+
   checkTimer.value = setInterval(async () => {
     try {
       // @ts-expect-error Electron
       const result = await window.electronAPI.checkPort(8082)
-      portStatus.value = result?.isListening ? 'online' : 'offline'
+      const isOnline = result?.isListening ?? false
 
-      // 只有在运行状态下，且发现离线时，才触发重启倒计时
-      if (robotState.value === 'running' && portStatus.value === 'offline') {
+      if (isOnline) {
+        portStatus.value = 'online'
+        // 端口上线后，清除刚启动标志
+        if (justStartedTimestamp > 0) {
+          console.log('服务启动成功，端口已上线')
+          justStartedTimestamp = 0
+        }
+      } else {
+        portStatus.value = 'offline'
+      }
+
+      // 只有在 running 状态下，且发现离线时，才触发重启倒计时
+      if (robotState.value === 'running' && !isOnline) {
+        // 检查是否刚启动（30秒内），避免立即触发重启
+        const timeSinceStart = Date.now() - justStartedTimestamp
+        if (justStartedTimestamp > 0 && timeSinceStart < 30000) {
+          console.log(`刚启动 ${Math.floor(timeSinceStart / 1000)} 秒，等待服务启动...`)
+          return
+        }
+        console.log('检测到端口离线，准备触发重启倒计时')
         scheduleRestart()
       }
     } catch (e) {
+      console.error('端口检测异常:', e)
       portStatus.value = 'offline'
     }
-  }, 2000)
+  }, 1000)
 }
 
 // 5. 触发重启倒计时（添加随机时间）
 function scheduleRestart() {
   if (robotState.value !== 'running') return
+
+  // 避免重复触发倒计时
+  if (restartTimer.value || countdownTimer.value) {
+    console.log('重启倒计时已在进行中，跳过')
+    return
+  }
 
   robotState.value = 'restarting'
 
@@ -220,6 +333,8 @@ function scheduleRestart() {
   const totalSeconds = restartIntervalMinutes.value * 60 + randomSeconds
 
   remainingSeconds.value = totalSeconds
+
+  console.log(`启动重启倒计时: ${totalSeconds}秒`)
 
   // 倒计时显示
   countdownTimer.value = setInterval(() => {
@@ -232,12 +347,38 @@ function scheduleRestart() {
   restartTimer.value = setTimeout(async () => {
     if (robotState.value === 'restarting') {
       try {
+        console.log('倒计时结束，执行自动重启')
+        operationLoading.value = true
+        loadingText.value = '正在重启服务...'
+        const startTime = Date.now()
+
         // @ts-expect-error Electron
         await window.electronAPI.executeScript({ command: 'restart' })
+
+        // 记录重启时间，避免立即再次触发重启倒计时
+        justStartedTimestamp = Date.now()
+
         robotState.value = 'running'
         clearInterval(countdownTimer.value!)
+        countdownTimer.value = null
+        restartTimer.value = null
+
+        // 确保遮罩至少显示800毫秒
+        const elapsed = Date.now() - startTime
+        const delay = Math.max(0, 800 - elapsed)
+        await new Promise(resolve => setTimeout(resolve, delay))
+
+        operationLoading.value = false
+        ElMessage.success('服务重启成功')
+        console.log('自动重启成功，启动计数保持为:', serviceStartCount.value)
       } catch (e) {
-        console.error('自动重启失败')
+        console.error('自动重启失败', e)
+        operationLoading.value = false
+        ElMessage.error('自动重启失败')
+        robotState.value = 'idle'
+        // 自动重启失败，重置计数
+        serviceStartCount.value = 0
+        console.log('自动重启失败，启动计数重置为:', serviceStartCount.value)
       }
     }
   }, totalSeconds * 1000)
@@ -277,7 +418,7 @@ onMounted(async () => {
   // @ts-expect-error Electron
   const cfg = await window.electronAPI.getScriptConfig()
   scriptConfig.value.scriptPath = cfg?.scriptPath || ''
-  startIndependentPortMonitoring()
+  // 注意：不在初始化时启动端口监控，只在点击启动按钮后才启动
 })
 
 onUnmounted(() => {
@@ -360,6 +501,62 @@ onUnmounted(() => {
   background: var(--color-background);
   margin: 0;
   padding: 0;
+  position: relative;
+}
+
+/* 操作过程中的遮罩层 */
+.operation-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f0f0f0;
+  border-top: 4px solid #42b883;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.loading-text {
+  color: #333;
+  font-size: 16px;
+  margin: 0;
 }
 
 /* 移动端适配 */
