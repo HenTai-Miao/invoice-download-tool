@@ -16,14 +16,14 @@
 - Run: `pnpm run electron:start` for Electron dev, `pnpm dev` for renderer-only Vite dev.
 - Test: no test command is defined in `package.json`.
 - Build assets: `pnpm run build:electron` must produce `dist-electron/renderer/index.html`, `dist-electron/main.js`, and `dist-electron/preload/index.js`.
-- Windows x64 package: `pnpm exec electron-builder -c electron-builder.yml --win --x64`; do not use plain `pnpm run dist:win` on Apple Silicon for the Beijing Windows machine.
+- Windows x64 package: `pnpm exec electron-builder -c electron-builder.yml --win --x64`; do not use plain `pnpm run dist:win` on Apple Silicon for an Intel/AMD Windows machine.
 - Lint/format: `pnpm run lint` runs ESLint with `--fix --cache`.
 
 ## Packaging Guardrails
 - Installer output belongs under `release/`; keeping it outside `dist-electron/` prevents recursive packaging of `win-unpacked`.
 - Before delivering a Windows installer, verify `release/win-unpacked/resources/app.asar` contains `/dist-electron/renderer/index.html`.
 - A blank white app window usually means the renderer bundle was not packaged. A several-hundred-MB installer usually means generated Windows output was packaged recursively.
-- See `AGENTS.d/deployment.md` for the exact Beijing Windows packaging checklist.
+- See `AGENTS.d/deployment.md` for the exact Windows packaging checklist.
 
 ## Knowledge Index
 - `AGENTS.d/runtime.md`: run/build/test commands, ports, env names, local services; create or update only when that detail exists.
