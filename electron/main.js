@@ -60,6 +60,14 @@ function persistStateDebounced() {
   }, 1000)
 }
 
+function getStatusList() {
+  return Array.from(fileStatusMap.values())
+}
+
+function notifyStatusUpdate() {
+  mainWindow?.webContents.send('file-status-update', getStatusList())
+}
+
 function updateStatus(name, status, progress = 0, size = 0, extra = {}) {
   const prev = fileStatusMap.get(name) || {}
   const next = {
@@ -74,11 +82,29 @@ function updateStatus(name, status, progress = 0, size = 0, extra = {}) {
 
   fileStatusMap.set(name, next)
   persistStateDebounced()
+  notifyStatusUpdate()
+}
 
-  mainWindow?.webContents.send(
-    'file-status-update',
-    Array.from(fileStatusMap.values())
-  )
+function pruneMissingFileStatuses(files) {
+  const existingFiles = new Set(files)
+  const now = Date.now()
+  let changed = false
+
+  fileStatusMap.forEach((meta, name) => {
+    if (existingFiles.has(name) || processingFiles.has(name)) return
+    if (
+      meta.status === FileStatus.SUCCESS &&
+      now - (meta.lastUpdate || 0) < 2000
+    ) return
+
+    fileStatusMap.delete(name)
+    changed = true
+  })
+
+  if (changed) {
+    persistStateDebounced()
+    notifyStatusUpdate()
+  }
 }
 
 /* ===================== 状态恢复 ===================== */
@@ -155,11 +181,7 @@ async function startUpload(fileName) {
       // 成功：从 map 删除（也就不会再落盘）
       fileStatusMap.delete(fileName)
       persistStateDebounced()
-
-      mainWindow?.webContents.send(
-        'file-status-update',
-        Array.from(fileStatusMap.values())
-      )
+      notifyStatusUpdate()
       checkQueue()
     }, 2000)
 
@@ -184,6 +206,8 @@ async function checkQueue() {
     await fs.mkdir(PENDING_UPLOAD_DIR, { recursive: true })
     const files = (await fs.readdir(PENDING_UPLOAD_DIR))
     .filter(f => f.endsWith('.zip'))
+
+    pruneMissingFileStatuses(files)
 
     // 新文件标记为 pending
     for (const f of files) {
@@ -274,6 +298,11 @@ app.whenReady().then(async () => {
     })
     checkQueue()
   }, CHECK_INTERVAL)
+})
+
+ipcMain.handle('get-upload-status', async () => {
+  await checkQueue()
+  return getStatusList()
 })
 
 ipcMain.handle('get-upload-history', () => uploadHistory)

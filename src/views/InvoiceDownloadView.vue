@@ -128,6 +128,16 @@ onMounted(async () => {
       uploadHistory.value = historyList;
     });
 
+    try {
+      const status = await electronAPI.getUploadStatus();
+      console.log('主动获取到的文件状态:', status);
+      if (status && Array.isArray(status)) {
+        files.value = status;
+      }
+    } catch (error) {
+      console.error('获取文件状态失败:', error);
+    }
+
     // 主动获取上传历史记录，确保页面刷新后能立即显示
     try {
       const history = await electronAPI.getUploadHistory();

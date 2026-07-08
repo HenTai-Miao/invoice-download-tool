@@ -3,6 +3,10 @@ import vue from '@vitejs/plugin-vue'
 import electron from 'vite-plugin-electron'
 
 export default defineConfig({
+  build: {
+    outDir: 'dist-electron/renderer',
+    emptyOutDir: true,
+  },
   plugins: [
     vue(),
     electron([
@@ -11,6 +15,7 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron',
+            emptyOutDir: false,
             rollupOptions: {
               external: ['electron'],
             },
@@ -22,6 +27,7 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron/preload',
+            emptyOutDir: false,
             rollupOptions: {
               external: ['electron'],
             },
