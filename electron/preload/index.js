@@ -1,3 +1,5 @@
+// Electron sandboxed preload scripts require CommonJS.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron');
 
 const IPC_CHANNELS = {
@@ -5,6 +7,7 @@ const IPC_CHANNELS = {
   ZIP_LIST: 'zip-list',
   UPLOAD_STATUS: 'upload-status',
   GET_UPLOAD_STATUS: 'get-upload-status',
+  RETRY_UPLOAD: 'retry-upload',
   GET_SCRIPT_CONFIG: 'get-script-config',
   SAVE_SCRIPT_CONFIG: 'save-script-config',
   EXECUTE_SCRIPT: 'execute-script'
@@ -17,6 +20,9 @@ const electronAPI = {
   requestZipList: () => ipcRenderer.invoke(IPC_CHANNELS.ZIP_LIST),
 
   getUploadStatus: () => ipcRenderer.invoke(IPC_CHANNELS.GET_UPLOAD_STATUS),
+
+  retryUpload: (fileName) =>
+    ipcRenderer.invoke(IPC_CHANNELS.RETRY_UPLOAD, fileName),
 
   getUploadHistory: () => ipcRenderer.invoke('get-upload-history'),
 
