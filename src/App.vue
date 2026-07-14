@@ -121,9 +121,9 @@ const loadingText = ref('') // loading提示文本
 const serviceStartCount = ref(0) // 启动服务计数：0=未启动，1=已启动过
 
 /* -------------------- 定时器句柄 -------------------- */
-const checkTimer = ref<NodeJS.Timeout | null>(null)
-const restartTimer = ref<NodeJS.Timeout | null>(null)
-const countdownTimer = ref<NodeJS.Timeout | null>(null)
+const checkTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const restartTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const countdownTimer = ref<ReturnType<typeof setInterval> | null>(null)
 let justStartedTimestamp = 0 // 记录刚启动的时间戳，避免立即触发重启
 
 /* -------------------- 设置相关 -------------------- */
@@ -166,7 +166,6 @@ async function handleOpenRobotBrowser() {
 
   try {
     // 先检测 8082 端口是否已在运行
-    // @ts-expect-error Electron
     const result = await window.electronAPI.checkPort(8082)
 
     if (result?.isListening) {
@@ -209,7 +208,7 @@ async function handleOpenRobotBrowser() {
       // 启动端口监控
       startIndependentPortMonitoring()
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('启动异常:', error)
     operationLoading.value = false
     ElMessage.error('启动失败，请检查脚本配置')
@@ -230,7 +229,6 @@ async function stopRobotService() {
     // 重置启动时间戳
     justStartedTimestamp = 0
 
-    // @ts-expect-error Electron
     await window.electronAPI.executeScript({ command: 'stop' })
 
     robotState.value = 'idle'
@@ -246,7 +244,7 @@ async function stopRobotService() {
     serviceStartCount.value = 0
     console.log('服务停止，启动计数重置为:', serviceStartCount.value)
     ElMessage.success('服务停止成功')
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('停止服务异常:', error)
     operationLoading.value = false
     ElMessage.error('停止服务失败，请检查脚本配置')
@@ -283,7 +281,6 @@ function startIndependentPortMonitoring() {
 
   checkTimer.value = setInterval(async () => {
     try {
-      // @ts-expect-error Electron
       const result = await window.electronAPI.checkPort(8082)
       const isOnline = result?.isListening ?? false
 
@@ -352,7 +349,6 @@ function scheduleRestart() {
         loadingText.value = '正在重启服务...'
         const startTime = Date.now()
 
-        // @ts-expect-error Electron
         await window.electronAPI.executeScript({ command: 'restart' })
 
         // 记录重启时间，避免立即再次触发重启倒计时
@@ -386,14 +382,14 @@ function scheduleRestart() {
 
 /* -------------------- Electron 文件操作 -------------------- */
 function selectScriptPath() {
-  // @ts-expect-error Electron
   window.electronAPI.showOpenDialog({
     properties: ['openFile'],
     filters: [{ name: '批处理文件', extensions: ['bat'] }],
     title: '选择脚本文件'
-  }).then((res: any) => {
-    if (!res.canceled && res.filePaths?.length) {
-      scriptConfig.value.scriptPath = res.filePaths[0]
+  }).then((res) => {
+    const selectedPath = res.filePaths[0]
+    if (!res.canceled && selectedPath) {
+      scriptConfig.value.scriptPath = selectedPath
     }
   })
 }
@@ -404,18 +400,16 @@ async function saveScriptConfig() {
     return
   }
   try {
-    // @ts-expect-error Electron
     await window.electronAPI.saveScriptConfig({ scriptPath: scriptConfig.value.scriptPath })
     ElMessage.success('配置保存成功')
     settingsDialogVisible.value = false
-  } catch (error) {
+  } catch {
     ElMessage.error('保存失败')
   }
 }
 
 /* -------------------- 生命周期 -------------------- */
 onMounted(async () => {
-  // @ts-expect-error Electron
   const cfg = await window.electronAPI.getScriptConfig()
   scriptConfig.value.scriptPath = cfg?.scriptPath || ''
   // 注意：不在初始化时启动端口监控，只在点击启动按钮后才启动

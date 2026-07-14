@@ -41,6 +41,23 @@
                   上传失败
                 </span>
               </div>
+              <p v-if="f.status === 'failed' && f.lastError" class="error-detail">
+                {{ f.lastError }}
+              </p>
+              <p v-if="f.status === 'failed' && f.nextRetryAt" class="retry-detail">
+                下次重试：{{ formatRetryTime(f.nextRetryAt) }}
+              </p>
+              <div v-if="f.status === 'failed' && f.retryable === false" class="manual-retry">
+                <span class="retry-detail">请检查文件或服务后手动重试</span>
+                <button
+                  type="button"
+                  class="retry-button"
+                  :disabled="retryingFiles.has(f.name)"
+                  @click="retryUpload(f.name)"
+                >
+                  {{ retryingFiles.has(f.name) ? '重试中...' : '重新尝试' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -79,12 +96,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { ElMessage } from "element-plus";
 
 interface FileItem {
   name: string;
   status: 'pending' | 'uploading' | 'success' | 'failed';
   progress?: number;
   size?: number;
+  lastError?: string;
+  businessCode?: number;
+  nextRetryAt?: number;
+  retryable?: boolean;
 }
 
 interface HistoryItem {
@@ -95,6 +117,7 @@ interface HistoryItem {
 
 const files = ref<FileItem[]>([]);
 const uploadHistory = ref<HistoryItem[]>([]);
+const retryingFiles = ref(new Set<string>());
 const pollInterval: number | null = null;
 
 // 格式化文件大小
@@ -106,10 +129,25 @@ function formatFileSize(bytes?: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatRetryTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString();
+}
+
+async function retryUpload(fileName: string) {
+  retryingFiles.value.add(fileName);
+  try {
+    const result = await window.electronAPI.retryUpload(fileName);
+    if (!result.success) ElMessage.error(result.message || '重试失败');
+  } catch {
+    ElMessage.error('重试失败');
+  } finally {
+    retryingFiles.value.delete(fileName);
+  }
+}
+
 onMounted(async () => {
-  // 使用类型断言来访问 electronAPI
   console.log('Window对象:', window);
-  const { electronAPI } = window as any;
+  const { electronAPI } = window;
   console.log('ElectronAPI:', electronAPI);
 
   if (electronAPI) {
@@ -373,6 +411,44 @@ onUnmounted(() => {
   color: #dc3545;
   background: #f8d7da;
   border: 1px solid #f5c6cb;
+}
+
+.error-detail,
+.retry-detail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.error-detail {
+  color: #b42318;
+  overflow-wrap: anywhere;
+}
+
+.retry-detail {
+  color: #667085;
+}
+
+.manual-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.retry-button {
+  flex: none;
+  padding: 4px 10px;
+  color: #b42318;
+  background: #fff;
+  border: 1px solid #fda29b;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.retry-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 /* 统一的时间样式 */
